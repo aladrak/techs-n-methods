@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SpecificationApp;
+namespace BinaryControl;
 public class FileManager : IDisposable
 {
 	private FileStream? _productStream;
@@ -10,9 +10,10 @@ public class FileManager : IDisposable
 	private SpecFileHeader _specHeader;
 	private string _productFilePath = "";
 	private string _specFilePath = "";
-	private bool _isOpen = false;
 
-	public bool IsOpen => _isOpen;
+	public bool IsOpen { get; private set; } = false;
+
+	public void Dispose() => CloseFiles();
 
 	public void CreateDatabase(string productName, string? specName = null, short nameLength = Sizes.DefaultNameLength)
 	{
@@ -33,7 +34,7 @@ public class FileManager : IDisposable
 		WriteProductHeader();
 		WriteSpecHeader();
 
-		_isOpen = true;
+		IsOpen = true;
 	}
 
 	public void OpenDatabase(string productName)
@@ -64,70 +65,19 @@ public class FileManager : IDisposable
 		_specStream = new FileStream(_specFilePath, FileMode.Open, FileAccess.ReadWrite);
 		ReadSpecHeader();
 
-		_isOpen = true;
-	}
-
-	public void CloseFiles()
-	{
-		if (_isOpen)
-		{
-			WriteProductHeader();
-			WriteSpecHeader();
-		}
-
-		_productStream?.Flush();
-		_productStream?.Close();
-		_productStream = null;
-
-		_specStream?.Flush();
-		_specStream?.Close();
-		_specStream = null;
-
-		_isOpen = false;
-	}
-
-	private void ReadProductHeader()
-	{
-		_productStream!.Position = 0;
-		byte[] buffer = new byte[Marshal.SizeOf<ProductFileHeader>()];
-		_productStream.Read(buffer, 0, buffer.Length);
-		_productHeader = ByteArrayToStructure<ProductFileHeader>(buffer);
-	}
-
-	private void WriteProductHeader()
-	{
-		if (_productStream == null) return;
-		_productStream.Position = 0;
-		byte[] buffer = StructureToByteArray(_productHeader);
-		_productStream.Write(buffer, 0, buffer.Length);
-	}
-
-	private void ReadSpecHeader()
-	{
-		_specStream!.Position = 0;
-		byte[] buffer = new byte[Marshal.SizeOf<SpecFileHeader>()];
-		_specStream.Read(buffer, 0, buffer.Length);
-		_specHeader = ByteArrayToStructure<SpecFileHeader>(buffer);
-	}
-
-	private void WriteSpecHeader()
-	{
-		if (_specStream == null) return;
-		_specStream.Position = 0;
-		byte[] buffer = StructureToByteArray(_specHeader);
-		_specStream.Write(buffer, 0, buffer.Length);
+		IsOpen = true;
 	}
 
 	public int AddProduct(string name, ComponentType type)
 	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
 
-		int recordSize = Marshal.SizeOf<ProductRecord>() + _productHeader.DataLength;
+		var recordSize = Marshal.SizeOf<ProductRecord>() + _productHeader.DataLength;
 		int position;
 
 		if (_productHeader.FreeAreaPtr == -1 || _productHeader.FreeAreaPtr >= _productStream!.Length)
 		{
-			position = (int)_productStream.Length;
+			position = (int)_productStream!.Length;
 			_productHeader.FreeAreaPtr = position + recordSize;
 		}
 		else
@@ -138,7 +88,7 @@ public class FileManager : IDisposable
 		var record = new ProductRecord
 		{
 			IsDeleted = 0,
-			SpecFilePtr = (type == ComponentType.Деталь) ? -1 : CreateSpecList(),
+			SpecFilePtr = (type == ComponentType.Detail) ? -1 : CreateSpecList(),
 			NextRecordPtr = _productHeader.FirstRecordPtr
 		};
 
@@ -155,36 +105,19 @@ public class FileManager : IDisposable
 		return position;
 	}
 
-	private int CreateSpecList()
-	{
-		int position = (int)_specStream!.Length;
-		var header = new SpecFileHeader
-		{
-			FirstRecordPtr = -1,
-			FreeAreaPtr = position + Marshal.SizeOf<SpecFileHeader>()
-		};
-
-		_specStream.Position = position;
-		byte[] buffer = StructureToByteArray(header);
-		_specStream.Write(buffer, 0, buffer.Length);
-
-		return position;
-	}
-
 	public void AddToSpecification(int productOffset, int componentOffset, short multiplicity)
 	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
 
 		var product = ReadProduct(productOffset);
 		if (product.SpecFilePtr == -1)
 			throw new InvalidOperationException("Нельзя добавить в спецификацию детали");
 
 		int specHeaderOffset = product.SpecFilePtr;
-
-		// Читаем заголовок спецификации
+		
 		_specStream!.Position = specHeaderOffset;
 		byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-		_specStream.Read(headerBytes, 0, headerBytes.Length);
+		_specStream.ReadExactly(headerBytes);
 		var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
 
 		int recordSize = Marshal.SizeOf<SpecRecord>();
@@ -225,17 +158,17 @@ public class FileManager : IDisposable
 		WriteSpecHeader();
 	}
 
-	public ProductInfo ReadProduct(int offset)
+	private ProductInfo ReadProduct(int offset)
 	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
 
 		_productStream!.Position = offset;
 		byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
-		_productStream.Read(recordBytes, 0, recordBytes.Length);
+		_productStream.ReadExactly(recordBytes);
 		var record = ByteArrayToStructure<ProductRecord>(recordBytes);
 
 		byte[] nameBytes = new byte[_productHeader.DataLength];
-		_productStream.Read(nameBytes, 0, nameBytes.Length);
+		_productStream.ReadExactly(nameBytes);
 		string name = Encoding.ASCII.GetString(nameBytes).TrimEnd();
 
 		return new ProductInfo
@@ -244,14 +177,14 @@ public class FileManager : IDisposable
 			Name = name,
 			SpecFilePtr = record.SpecFilePtr,
 			IsDeleted = record.IsDeleted == -1,
-			Type = record.SpecFilePtr == -1 ? ComponentType.Деталь : ComponentType.Узел
+			Type = record.SpecFilePtr == -1 ? ComponentType.Detail : ComponentType.Node
 		};
 	}
 
-	public List<ProductInfo> GetAllProducts()
+	private List<ProductInfo> GetAllProducts()
 	{
 		var products = new List<ProductInfo>();
-		if (!_isOpen) return products;
+		if (!IsOpen) return products;
 
 		int ptr = _productHeader.FirstRecordPtr;
 		while (ptr != -1 && ptr < _productStream!.Length)
@@ -267,14 +200,6 @@ public class FileManager : IDisposable
 		return products;
 	}
 
-	private int GetNextProductPtr(int offset)
-	{
-		_productStream!.Position = offset + Marshal.SizeOf<ProductRecord>() + _productHeader.DataLength - 4;
-		byte[] ptrBytes = new byte[4];
-		_productStream.Read(ptrBytes, 0, 4);
-		return BitConverter.ToInt32(ptrBytes, 0);
-	}
-
 	public ProductInfo? FindProductByName(string name)
 	{
 		var products = GetAllProducts();
@@ -283,7 +208,7 @@ public class FileManager : IDisposable
 
 	public void LogicalDeleteProduct(string name)
 	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
 
 		var product = FindProductByName(name);
 		if (product == null) throw new InvalidOperationException($"Компонент '{name}' не найден");
@@ -295,46 +220,9 @@ public class FileManager : IDisposable
 		SetProductDeleted(product.FileOffset, true);
 	}
 
-	private bool HasReferences(int productOffset)
-	{
-		_specStream!.Position = 0;
-		byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-		_specStream.Read(headerBytes, 0, headerBytes.Length);
-		var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
-
-		int ptr = specHeader.FirstRecordPtr;
-		while (ptr != -1 && ptr < _specStream.Length)
-		{
-			_specStream.Position = ptr;
-			byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-			_specStream.Read(recordBytes, 0, recordBytes.Length);
-			var record = ByteArrayToStructure<SpecRecord>(recordBytes);
-
-			if (record.IsDeleted == 0 && record.ProductFilePtr == productOffset)
-				return true;
-
-			ptr = record.NextRecordPtr;
-		}
-
-		return false;
-	}
-
-	private void SetProductDeleted(int offset, bool deleted)
-	{
-		_productStream!.Position = offset;
-		byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
-		_productStream.Read(recordBytes, 0, recordBytes.Length);
-		var record = ByteArrayToStructure<ProductRecord>(recordBytes);
-		record.IsDeleted = (sbyte)(deleted ? -1 : 0);
-
-		_productStream.Position = offset;
-		byte[] newRecordBytes = StructureToByteArray(record);
-		_productStream.Write(newRecordBytes, 0, newRecordBytes.Length);
-	}
-
 	public void RestoreProduct(string name)
 	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
 
 		var products = GetAllProducts();
 		foreach (var product in products)
@@ -351,23 +239,11 @@ public class FileManager : IDisposable
 		}
 	}
 
-	public void RestoreAll()
-	{
-		RestoreProduct("*");
-	}
-
-	private void SortProducts()
-	{
-		var products = GetAllProducts();
-		var activeProducts = products.Where(p => !p.IsDeleted).OrderBy(p => p.Name).ToList();
-
-		// Перезапись файла с сортировкой
-		Truncate();
-	}
+	public void RestoreAll() => RestoreProduct("*");
 
 	public void Truncate()
 	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
 
 		// Читаем все активные продукты
 		var products = GetAllProducts().Where(p => !p.IsDeleted).OrderBy(p => p.Name).ToList();
@@ -391,7 +267,7 @@ public class FileManager : IDisposable
 		// Обновляем заголовки для спецификаций
 		_productStream!.Position = 0;
 		byte[] headerBytes = new byte[Marshal.SizeOf<ProductFileHeader>()];
-		_productStream.Read(headerBytes, 0, headerBytes.Length);
+		_productStream.ReadExactly(headerBytes);
 		var productHeader = ByteArrayToStructure<ProductFileHeader>(headerBytes);
 
 		// Записываем спецификации
@@ -409,10 +285,105 @@ public class FileManager : IDisposable
 		}
 	}
 
+	public void PrintSpecification(string name, int indent = 0)
+	{
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
+
+		var product = FindProductByName(name);
+		if (product == null) throw new InvalidOperationException($"Компонент '{name}' не найден");
+
+		if (product.Type == ComponentType.Detail)
+			throw new InvalidOperationException("Нельзя вывести спецификацию детали");
+
+		PrintSpecRecursive(product, indent);
+	}
+	
+	public void PrintAllProducts()
+	{
+		if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
+
+		var products = GetAllProducts().Where(p => !p.IsDeleted).OrderBy(p => p.Name);
+		foreach (var product in products)
+			Console.WriteLine($"{product.Name, -30} {product.Type}");
+	}
+	
+	private void CloseFiles()
+	{
+		if (IsOpen)
+		{
+			WriteProductHeader();
+			WriteSpecHeader();
+		}
+
+		_productStream?.Flush();
+		_productStream?.Close();
+		_productStream = null;
+
+		_specStream?.Flush();
+		_specStream?.Close();
+		_specStream = null;
+
+		IsOpen = false;
+	}
+	
+	private int GetNextProductPtr(int offset)
+	{
+		_productStream!.Position = offset + Marshal.SizeOf<ProductRecord>() + _productHeader.DataLength - 4;
+		byte[] ptrBytes = new byte[4];
+		_productStream.ReadExactly(ptrBytes, 0, 4);
+		return BitConverter.ToInt32(ptrBytes, 0);
+	}
+	
+	private bool HasReferences(int productOffset)
+	{
+		_specStream!.Position = 0;
+		byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
+		_specStream.ReadExactly(headerBytes);
+		var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
+
+		int ptr = specHeader.FirstRecordPtr;
+		while (ptr != -1 && ptr < _specStream.Length)
+		{
+			_specStream.Position = ptr;
+			byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
+			_specStream.ReadExactly(recordBytes);
+			var record = ByteArrayToStructure<SpecRecord>(recordBytes);
+
+			if (record.IsDeleted == 0 && record.ProductFilePtr == productOffset)
+				return true;
+
+			ptr = record.NextRecordPtr;
+		}
+
+		return false;
+	}
+
+	private void SetProductDeleted(int offset, bool deleted)
+	{
+		_productStream!.Position = offset;
+		byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
+		_productStream.ReadExactly(recordBytes);
+		var record = ByteArrayToStructure<ProductRecord>(recordBytes);
+		record.IsDeleted = (sbyte)(deleted ? -1 : 0);
+
+		_productStream.Position = offset;
+		byte[] newRecordBytes = StructureToByteArray(record);
+		_productStream.Write(newRecordBytes, 0, newRecordBytes.Length);
+	}
+	
+	private void SortProducts()
+	{
+		var products = GetAllProducts();
+		var activeProducts = products.Where(p => !p.IsDeleted).OrderBy(p => p.Name).ToList();
+
+		// Перезапись файла с сортировкой
+		Truncate();
+	}
+	
 	private List<SpecInfo> GetAllSpecifications()
 	{
 		var specs = new List<SpecInfo>();
-		if (!_isOpen || _specStream == null) return specs;
+		if (!IsOpen || _specStream == null) return specs;
 
 		// Проходим по всем спецификациям всех продуктов
 		var products = GetAllProducts();
@@ -428,19 +399,6 @@ public class FileManager : IDisposable
 		return specs;
 	}
 
-	public void PrintSpecification(string name, int indent = 0)
-	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
-
-		var product = FindProductByName(name);
-		if (product == null) throw new InvalidOperationException($"Компонент '{name}' не найден");
-
-		if (product.Type == ComponentType.Деталь)
-			throw new InvalidOperationException("Нельзя вывести спецификацию детали");
-
-		PrintSpecRecursive(product, indent);
-	}
-
 	private void PrintSpecRecursive(ProductInfo product, int indent)
 	{
 		string prefix = new string(' ', indent * 2);
@@ -453,7 +411,7 @@ public class FileManager : IDisposable
 			// Читаем заголовок спецификации
 			_specStream.Position = product.SpecFilePtr;
 			byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-			_specStream.Read(headerBytes, 0, headerBytes.Length);
+			_specStream.ReadExactly(headerBytes);
 			var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
 
 			int ptr = specHeader.FirstRecordPtr;
@@ -462,7 +420,7 @@ public class FileManager : IDisposable
 			{
 				_specStream.Position = ptr;
 				byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-				_specStream.Read(recordBytes, 0, recordBytes.Length);
+				_specStream.ReadExactly(recordBytes);
 				var record = ByteArrayToStructure<SpecRecord>(recordBytes);
 
 				if (record.IsDeleted == 0)
@@ -482,16 +440,53 @@ public class FileManager : IDisposable
 			}
 		}
 	}
-
-	public void PrintAllProducts()
+	
+	private void ReadProductHeader()
 	{
-		if (!_isOpen) throw new InvalidOperationException("База данных не открыта");
+		_productStream!.Position = 0;
+		byte[] buffer = new byte[Marshal.SizeOf<ProductFileHeader>()];
+		_productStream.ReadExactly(buffer);
+		_productHeader = ByteArrayToStructure<ProductFileHeader>(buffer);
+	}
 
-		var products = GetAllProducts().Where(p => !p.IsDeleted).OrderBy(p => p.Name);
-		foreach (var product in products)
+	private void WriteProductHeader()
+	{
+		if (_productStream == null) return;
+		_productStream.Position = 0;
+		byte[] buffer = StructureToByteArray(_productHeader);
+		_productStream.Write(buffer, 0, buffer.Length);
+	}
+
+	private void ReadSpecHeader()
+	{
+		_specStream!.Position = 0;
+		byte[] buffer = new byte[Marshal.SizeOf<SpecFileHeader>()];
+		_specStream.ReadExactly(buffer);
+		_specHeader = ByteArrayToStructure<SpecFileHeader>(buffer);
+	}
+
+	private void WriteSpecHeader()
+	{
+		if (_specStream == null) return;
+		_specStream.Position = 0;
+		byte[] buffer = StructureToByteArray(_specHeader);
+		_specStream.Write(buffer, 0, buffer.Length);
+	}
+	
+	private int CreateSpecList()
+	{
+		int position = (int)_specStream!.Length;
+		var header = new SpecFileHeader
 		{
-			Console.WriteLine($"{product.Name,-30} {product.Type}");
-		}
+			FirstRecordPtr = -1,
+			FreeAreaPtr = position + Marshal.SizeOf<SpecFileHeader>()
+		};
+
+		_specStream.Position = position;
+		byte[] buffer = StructureToByteArray(header);
+		_specStream.Write(buffer, 0, buffer.Length);
+
+		return position;
 	}
 
 	private T ByteArrayToStructure<T>(byte[] bytes) where T : struct
@@ -521,10 +516,5 @@ public class FileManager : IDisposable
 			handle.Free();
 		}
 		return bytes;
-	}
-
-	public void Dispose()
-	{
-		CloseFiles();
 	}
 }

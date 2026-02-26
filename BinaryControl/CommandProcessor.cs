@@ -1,4 +1,4 @@
-﻿namespace SpecificationApp;
+﻿namespace BinaryControl;
 public class CommandProcessor
 {
 	private readonly FileManager _fileManager;
@@ -10,7 +10,7 @@ public class CommandProcessor
 
 	public string Execute(string input)
 	{
-		var parts = input.Trim().Split(new[] { ' ', '(', ')', ',' }, StringSplitOptions.RemoveEmptyEntries);
+		var parts = input.Trim().Split([' ', '(', ')', ','], StringSplitOptions.RemoveEmptyEntries);
 		if (parts.Length == 0) return "";
 
 		string command = parts[0].ToLower();
@@ -165,36 +165,35 @@ public class CommandProcessor
 		if (name == "*")
 		{
 			_fileManager.PrintAllProducts();
-			return "";
 		}
 		else
 		{
 			_fileManager.PrintSpecification(name);
-			return "";
 		}
+
+		return "";
 	}
 
 	private string HandleHelp(string[] parts)
 	{
-		string helpText = @"
-Доступные команды:
-  Create <имя> [длина] [спецификация] - Создать базу данных
-  Open <имя>                          - Открыть базу данных
-  Input (имя, тип)                    - Добавить компонент (Изделие/Узел/Деталь)
-  Input (имя/комплектующее)           - Добавить в спецификацию
-  Delete (имя)                        - Логически удалить компонент
-  Restore (имя) или Restore (*)       - Восстановить удаленные
-  Truncate                            - Физически удалить помеченные
-  Print (имя) или Print (*)           - Вывести спецификацию или список
-  Help                                - Показать эту справку
-  Exit                                - Выход
-";
-		if (parts.Length > 1)
-		{
-			File.WriteAllText(parts[1], helpText);
-			return $"Справка сохранена в {parts[1]}";
-		}
+		const string helpText = """
 
-		return helpText;
+		                        Доступные команды:
+		                          Create <имя> [длина] [спецификация] - Создать базу данных
+		                          Open <имя>                          - Открыть базу данных
+		                          Input (имя, тип)                    - Добавить компонент (Product/Node/Detail)
+		                          Input (имя/комплектующее)           - Добавить в спецификацию
+		                          Delete (имя)                        - Логически удалить компонент
+		                          Restore (имя) или Restore (*)       - Восстановить удаленные
+		                          Truncate                            - Физически удалить помеченные
+		                          Print (имя) или Print (*)           - Вывести спецификацию или список
+		                          Help                                - Показать эту справку
+		                          Exit                                - Выход
+
+		                        """;
+		if (parts.Length <= 1) return helpText;
+		File.WriteAllText(parts[1], helpText);
+		return $"Справка сохранена в {parts[1]}";
+
 	}
 }

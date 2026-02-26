@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SpecificationApp;
+namespace BinaryControl;
 
 public static class Sizes
 {
@@ -74,9 +74,9 @@ public struct SpecRecord
 
 public enum ComponentType
 {
-	Изделие,
-	Узел,
-	Деталь
+	Product,
+	Node,
+	Detail
 }
 
 public class ProductInfo

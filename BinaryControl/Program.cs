@@ -1,9 +1,8 @@
-﻿using SpecificationApp;
+﻿namespace BinaryControl;
 
-namespace SpecificationApp;
 class Program
 {
-	static void Main(string[] args)
+	private static void Main(string[] args)
 	{
 		var fileManager = new FileManager();
 		var processor = new CommandProcessor(fileManager);

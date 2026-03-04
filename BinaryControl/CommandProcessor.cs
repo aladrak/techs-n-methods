@@ -72,9 +72,9 @@ public class CommandProcessor
 		if (!_fileManager.IsOpen) return "Сначала откройте или создайте базу данных";
 
 		// Input (имя, тип) или Input (имя/комплектующее)
+		// Добавление в спецификацию
 		if (input.Contains('/'))
 		{
-			// Добавление в спецификацию
 			var match = System.Text.RegularExpressions.Regex.Match(input, @"\(([^/]+)/([^)]+)\)");
 			if (!match.Success) return "Неверный формат. Используйте: Input (имя/комплектующее)";
 
@@ -90,9 +90,9 @@ public class CommandProcessor
 			_fileManager.AddToSpecification(component.FileOffset, part.FileOffset, 1);
 			return $"Добавлено '{partName}' в спецификацию '{componentName}'";
 		}
+		// Добавление компонента
 		else
 		{
-			// Добавление компонента
 			var match = System.Text.RegularExpressions.Regex.Match(input, @"\(([^,]+),\s*([^)]+)\)");
 			if (!match.Success) return "Неверный формат. Используйте: Input (имя, тип)";
 
@@ -111,19 +111,12 @@ public class CommandProcessor
 	{
 		if (!_fileManager.IsOpen) return "Сначала откройте или создайте базу данных";
 
-		if (input.Contains('/'))
-		{
-			return "Удаление из спецификации не реализовано в этой версии";
-		}
-		else
-		{
-			var match = System.Text.RegularExpressions.Regex.Match(input, @"\(([^)]+)\)");
-			if (!match.Success) return "Неверный формат. Используйте: Delete (имя)";
+		var match = System.Text.RegularExpressions.Regex.Match(input, @"\(([^)]+)\)");
+		if (!match.Success) return "Неверный формат. Используйте: Delete (имя)";
 
-			string name = match.Groups[1].Value.Trim();
-			_fileManager.LogicalDeleteProduct(name);
-			return $"Компонент '{name}' помечен на удаление";
-		}
+		var name = match.Groups[1].Value.Trim();
+		_fileManager.LogicalDeleteProduct(name);
+		return $"Компонент '{name}' помечен на удаление";
 	}
 
 	private string HandleRestore(string[] parts)
@@ -163,13 +156,9 @@ public class CommandProcessor
 		string name = parts[1].Trim('(', ')');
 
 		if (name == "*")
-		{
 			_fileManager.PrintAllProducts();
-		}
 		else
-		{
 			_fileManager.PrintSpecification(name);
-		}
 
 		return "";
 	}
@@ -194,6 +183,5 @@ public class CommandProcessor
 		if (parts.Length <= 1) return helpText;
 		File.WriteAllText(parts[1], helpText);
 		return $"Справка сохранена в {parts[1]}";
-
 	}
 }

@@ -11,19 +11,21 @@ public class FileManager : IDisposable
     private string _productFilePath = "";
     private string _specFilePath = "";
 
-    public bool IsOpen { get; private set; } = false;
+    private readonly List<ProductInfo> _products = [];
+    private readonly List<SpecInfo> _specs = [];
+
+    public bool IsOpen { get; private set; }
 
     public void Dispose() => CloseFiles();
 
-    public void CreateDatabase(string productName, string? specName = null, short nameLength = Sizes.DefaultNameLength)
+    public void CreateDatabase(string productName, short nameLength = Sizes.DefaultNameLength)
     {
         CloseFiles();
+        _products.Clear();
+        _specs.Clear();
 
-        _productFilePath = productName.EndsWith(".prd") ? productName : productName + ".prd";
-        _specFilePath = specName ?? _productFilePath.Replace(".prd", ".prs");
-
-        if (!_specFilePath.EndsWith(".prs"))
-            _specFilePath = _specFilePath.Replace(Path.GetExtension(_specFilePath), ".prs");
+        _productFilePath = productName + ".prd";
+        _specFilePath = productName + ".prs";
 
         _productHeader = ProductFileHeader.Create(Path.GetFileName(_specFilePath), nameLength);
         _specHeader = SpecFileHeader.Create();
@@ -40,262 +42,375 @@ public class FileManager : IDisposable
     public void OpenDatabase(string productName)
     {
         CloseFiles();
+        _products.Clear();
+        _specs.Clear();
 
-        _productFilePath = productName.EndsWith(".prd") ? productName : productName + ".prd";
-        _specFilePath = _productFilePath.Replace(".prd", ".prs");
+        _productFilePath = productName + ".prd";
+        _specFilePath = productName + ".prs";
 
-        if (!File.Exists(_productFilePath))
-            throw new FileNotFoundException($"Файл {_productFilePath} не найден");
+        if (!File.Exists(_productFilePath)) throw new Exception($"Файл {_productFilePath} не найден");
+        if (!File.Exists(_specFilePath)) throw new Exception($"Файл спецификаций {_specFilePath} не найден");
 
         _productStream = new FileStream(_productFilePath, FileMode.Open, FileAccess.ReadWrite);
+        _specStream = new FileStream(_specFilePath, FileMode.Open, FileAccess.ReadWrite);
 
         ReadProductHeader();
-
-        if (_productHeader.Signature[0] != 'P' || _productHeader.Signature[1] != 'S')
-            throw new InvalidOperationException("Неверная сигнатура файла");
-
-        byte[] specFileNameBytes = _productHeader.SpecFileName;
-        string specFileName = Encoding.ASCII.GetString(specFileNameBytes).Trim();
-
-        _specFilePath = Path.Combine(Path.GetDirectoryName(_productFilePath) ?? "", specFileName);
-
-        if (!File.Exists(_specFilePath))
-            throw new FileNotFoundException($"Файл спецификаций {_specFilePath} не найден");
-
-        _specStream = new FileStream(_specFilePath, FileMode.Open, FileAccess.ReadWrite);
         ReadSpecHeader();
 
+        if (_productHeader.Signature[0] != 'P' || _productHeader.Signature[1] != 'S')
+            throw new Exception("Неверная сигнатура файла");
+
+        LoadFromFiles();
         IsOpen = true;
     }
 
+    private void LoadFromFiles()
+    {
+        int ptr = _productHeader.FirstRecordPtr;
+        var visited = new HashSet<int>();
+        while (ptr != -1 && ptr < _productStream!.Length && !visited.Contains(ptr))
+        {
+            visited.Add(ptr);
+            _productStream.Position = ptr;
+            byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
+            _productStream.ReadExactly(recordBytes);
+            var record = ByteArrayToStructure<ProductRecord>(recordBytes);
+
+            byte[] nameBytes = new byte[_productHeader.DataLength];
+            _productStream.ReadExactly(nameBytes);
+            string name = Encoding.ASCII.GetString(nameBytes).TrimEnd();
+
+            _products.Add(new ProductInfo
+            {
+                FileOffset = ptr,
+                Name = name,
+                SpecFilePtr = record.SpecFilePtr,
+                IsDeleted = record.IsDeleted == -1,
+                Type = (ComponentType)record.Type
+            });
+            ptr = record.NextRecordPtr;
+        }
+
+        foreach (var prod in _products.Where(p => p.SpecFilePtr != -1))
+        {
+            _specStream!.Position = prod.SpecFilePtr;
+            byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
+            _specStream.ReadExactly(headerBytes);
+            var header = ByteArrayToStructure<SpecFileHeader>(headerBytes);
+
+            int specPtr = header.FirstRecordPtr;
+            int count = 0;
+            while (specPtr != -1 && specPtr < _specStream.Length && count < 10000)
+            {
+                _specStream.Position = specPtr;
+                byte[] recBytes = new byte[Marshal.SizeOf<SpecRecord>()];
+                _specStream.ReadExactly(recBytes);
+                var rec = ByteArrayToStructure<SpecRecord>(recBytes);
+
+                _specs.Add(new SpecInfo
+                {
+                    FileOffset = specPtr,
+                    ProductFilePtr = rec.ProductFilePtr,
+                    Multiplicity = rec.Multiplicity,
+                    NextRecordPtr = rec.NextRecordPtr,
+                    IsDeleted = rec.IsDeleted == -1,
+                    OwnerOffset = prod.FileOffset
+                });
+                specPtr = rec.NextRecordPtr;
+                count++;
+            }
+        }
+    }
+
+    private void SaveChanges()
+    {
+        if (!IsOpen) return;
+
+        var activeProducts = _products.Where(p => !p.IsDeleted).OrderBy(p => p.Name).ToList();
+        var activeSpecs = _specs.Where(s => !s.IsDeleted).ToList();
+
+        _productStream?.Close();
+        _specStream?.Close();
+
+        _productStream = new FileStream(_productFilePath, FileMode.Create, FileAccess.ReadWrite);
+        _specStream = new FileStream(_specFilePath, FileMode.Create, FileAccess.ReadWrite);
+
+        _productHeader = ProductFileHeader.Create(Path.GetFileName(_specFilePath), _productHeader.DataLength);
+        _specHeader = SpecFileHeader.Create();
+        WriteProductHeader();
+        WriteSpecHeader();
+
+        var productNameToNewOffset = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var productOldToNew = new Dictionary<int, int>();
+
+        // Запись продуктов
+        foreach (var prod in activeProducts)
+        {
+            int recordOffset = (int)_productStream!.Position;
+            productNameToNewOffset[prod.Name] = recordOffset;
+            productOldToNew[prod.FileOffset] = recordOffset;
+
+            // Создаём запись продукта
+            int specFilePtr = -1;
+            if (prod.Type != ComponentType.Detail)
+            {
+                // 
+            }
+
+            var record = new ProductRecord
+            {
+                IsDeleted = 0,
+                SpecFilePtr = specFilePtr,
+                NextRecordPtr = -1,
+                Type = (sbyte)prod.Type
+            };
+            byte[] recBytes = StructureToByteArray(record);
+            _productStream.Write(recBytes, 0, recBytes.Length);
+
+            byte[] nameBytes = Encoding.ASCII.GetBytes(prod.Name.PadRight(_productHeader.DataLength)[.._productHeader.DataLength]);
+            _productStream.Write(nameBytes, 0, nameBytes.Length);
+        }
+
+        // Обновим NextRecordPtr для продуктов (строим список)
+        var productOffsets = activeProducts.Select(p => productNameToNewOffset[p.Name]).ToList();
+        for (int i = 0; i < productOffsets.Count; i++)
+        {
+            int nextPtr = (i < productOffsets.Count - 1) ? productOffsets[i + 1] : -1;
+            _productStream!.Position = productOffsets[i] + 1 + 4;
+            byte[] nextBytes = BitConverter.GetBytes(nextPtr);
+            _productStream.Write(nextBytes, 0, 4);
+        }
+        _productHeader.FirstRecordPtr = productOffsets.Count > 0 ? productOffsets[0] : -1;
+        _productHeader.FreeAreaPtr = (int)_productStream!.Position;
+        
+        var specsByOwnerName = activeSpecs
+            .GroupBy(s => _products.First(p => p.FileOffset == s.OwnerOffset).Name)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var prod in activeProducts.Where(p => p.Type != ComponentType.Detail))
+        {
+            if (!specsByOwnerName.TryGetValue(prod.Name, out var specList))
+                continue;
+
+            // Заголовок списка в файле спецификаций
+            int headerOffset = (int)_specStream!.Position;
+            var specHeader = new SpecFileHeader { FirstRecordPtr = -1, FreeAreaPtr = headerOffset + Marshal.SizeOf<SpecFileHeader>() };
+            byte[] headerBytes = StructureToByteArray(specHeader);
+            _specStream.Write(headerBytes, 0, headerBytes.Length);
+
+            // Запись записей спецификации для этого владельца
+            List<int> specRecordOffsets = [];
+            foreach (var spec in specList)
+            {
+                int recOffset = (int)_specStream.Position;
+                specRecordOffsets.Add(recOffset);
+
+                var comp = activeProducts.First(c => c.Name.Equals(
+                    _products.First(p => p.FileOffset == spec.ProductFilePtr).Name,
+                    StringComparison.OrdinalIgnoreCase));
+                int newCompOffset = productNameToNewOffset[comp.Name];
+
+                var specRecord = new SpecRecord
+                {
+                    IsDeleted = 0,
+                    ProductFilePtr = newCompOffset,
+                    Multiplicity = spec.Multiplicity,
+                    NextRecordPtr = -1
+                };
+                byte[] recBytes = StructureToByteArray(specRecord);
+                _specStream.Write(recBytes, 0, recBytes.Length);
+            }
+
+            // Обновляем NextRecordPtr в записях спецификации
+            for (int i = 0; i < specRecordOffsets.Count; i++)
+            {
+                int nextPtr = (i < specRecordOffsets.Count - 1) ? specRecordOffsets[i + 1] : -1;
+                _specStream.Position = specRecordOffsets[i] + 1 + 4 + 2; // IsDeleted (1), ProductFilePtr (4), Multiplicity (2), потом NextRecordPtr
+                byte[] nextBytes = BitConverter.GetBytes(nextPtr);
+                _specStream.Write(nextBytes, 0, 4);
+            }
+
+            if (specRecordOffsets.Count > 0)
+            {
+                specHeader.FirstRecordPtr = specRecordOffsets[0];
+                specHeader.FreeAreaPtr = (int)_specStream.Position;
+                _specStream.Position = headerOffset;
+                headerBytes = StructureToByteArray(specHeader);
+                _specStream.Write(headerBytes, 0, headerBytes.Length);
+            }
+
+            // Обновляем SpecFilePtr у продукта в файле продуктов
+            int prodOffset = productNameToNewOffset[prod.Name];
+            _productStream!.Position = prodOffset + 1;
+            byte[] specPtrBytes = BitConverter.GetBytes(headerOffset);
+            _productStream.Write(specPtrBytes, 0, 4);
+        }
+
+        _specHeader.FreeAreaPtr = (int)_specStream!.Position;
+        WriteSpecHeader();
+        WriteProductHeader();
+
+        _products.Clear();
+        _specs.Clear();
+        LoadFromFiles();
+    }
+    
     public int AddProduct(string name, ComponentType type)
     {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
+        if (!IsOpen) throw new Exception("База данных не открыта");
+        if (_products.Any(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !p.IsDeleted))
+            throw new Exception("Компонент с таким именем уже существует");
 
-        var recordSize = Marshal.SizeOf<ProductRecord>() + _productHeader.DataLength;
-        int position;
-
-        if (_productHeader.FreeAreaPtr == -1 || _productHeader.FreeAreaPtr >= _productStream!.Length)
+        var product = new ProductInfo
         {
-            position = (int)_productStream!.Length;
-            _productHeader.FreeAreaPtr = position + recordSize;
-        }
-        else
-        {
-            position = _productHeader.FreeAreaPtr;
-        }
-
-        var record = new ProductRecord
-        {
-            IsDeleted = 0,
-            SpecFilePtr = (type == ComponentType.Detail) ? -1 : CreateSpecList(),
-            NextRecordPtr = _productHeader.FirstRecordPtr
+            FileOffset = -1,
+            Name = name,
+            Type = type,
+            SpecFilePtr = type == ComponentType.Detail ? -1 : 0,
+            IsDeleted = false
         };
-
-        _productHeader.FirstRecordPtr = position;
-
-        _productStream.Position = position;
-        var recordBytes = StructureToByteArray(record);
-        _productStream.Write(recordBytes, 0, recordBytes.Length);
-
-        var nameBytes = Encoding.ASCII.GetBytes(name.PadRight(_productHeader.DataLength).Substring(0, _productHeader.DataLength));
-        _productStream.Write(nameBytes, 0, nameBytes.Length);
-
-        WriteProductHeader();
-        return position;
+        _products.Add(product);
+        return -1;
     }
 
     public void AddToSpecification(int productOffset, int componentOffset, short multiplicity)
     {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
+        if (!IsOpen) throw new Exception("База данных не открыта");
 
-        var product = ReadProduct(productOffset);
-        if (product.SpecFilePtr == -1)
-            throw new InvalidOperationException("Нельзя добавить в спецификацию детали");
+        var product = _products.FirstOrDefault(p => p.FileOffset == productOffset && !p.IsDeleted)
+            ?? throw new Exception("Продукт не найден");
+        if (product.Type == ComponentType.Detail)
+            throw new Exception("Нельзя добавить в спецификацию детали");
 
-        int specHeaderOffset = product.SpecFilePtr;
-        
-        if (IsComponentInSpecification(specHeaderOffset, componentOffset))
-            throw new InvalidOperationException($"Компонент уже есть в спецификации");
+        if (_products.FirstOrDefault(p => p.FileOffset == componentOffset && !p.IsDeleted) == null)
+            throw new Exception("Комплектующее не найдено");
 
-        // Читаем заголовок спецификации
-        _specStream!.Position = specHeaderOffset;
-        byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-        _specStream.ReadExactly(headerBytes);
-        var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
+        // Проверка на дубликат
+        if (_specs.Any(s => !s.IsDeleted && s.OwnerOffset == productOffset && s.ProductFilePtr == componentOffset))
+            throw new Exception("Компонент уже есть в спецификации");
 
-        int recordSize = Marshal.SizeOf<SpecRecord>();
-        int position;
-
-        if (specHeader.FreeAreaPtr == -1 || specHeader.FreeAreaPtr >= _specStream.Length)
+        _specs.Add(new SpecInfo
         {
-            position = (int)_specStream.Length;
-            specHeader.FreeAreaPtr = position + recordSize;
-        }
-        else
-            position = specHeader.FreeAreaPtr;
-
-        var record = new SpecRecord
-        {
-            IsDeleted = 0,
+            FileOffset = -1,
             ProductFilePtr = componentOffset,
             Multiplicity = multiplicity,
-            NextRecordPtr = specHeader.FirstRecordPtr
-        };
-
-        specHeader.FirstRecordPtr = position;
-
-        // Записываем обновленный заголовок
-        _specStream.Position = specHeaderOffset;
-        byte[] newHeaderBytes = StructureToByteArray(specHeader);
-        _specStream.Write(newHeaderBytes, 0, newHeaderBytes.Length);
-
-        // Записываем запись
-        _specStream.Position = position;
-        byte[] recordBytes = StructureToByteArray(record);
-        _specStream.Write(recordBytes, 0, recordBytes.Length);
+            NextRecordPtr = -1,
+            IsDeleted = false,
+            OwnerOffset = productOffset
+        });
     }
 
-    private bool IsComponentInSpecification(int specHeaderOffset, int componentOffset)
-    {
-        _specStream!.Position = specHeaderOffset;
-        byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-        _specStream.ReadExactly(headerBytes);
-        var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
-
-        int ptr = specHeader.FirstRecordPtr;
-        int count = 0;
-        while (ptr != -1 && ptr < _specStream.Length && count < 10000)
-        {
-            _specStream.Position = ptr;
-            byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-            _specStream.ReadExactly(recordBytes);
-            var record = ByteArrayToStructure<SpecRecord>(recordBytes);
-
-            if (record.IsDeleted == 0 && record.ProductFilePtr == componentOffset)
-                return true;
-
-            ptr = record.NextRecordPtr;
-            count++;
-        }
-
-        return false;
-    }
-
-    public ProductInfo? FindProductByName(string name)
-    {
-        var products = GetAllProducts();
-        return products.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !p.IsDeleted);
-    }
+    public ProductInfo? FindProductByName(string name) =>
+        _products.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && !p.IsDeleted);
 
     public void LogicalDeleteProduct(string name)
     {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
-
-        var product = FindProductByName(name);
-        if (product == null) throw new InvalidOperationException($"Компонент '{name}' не найден");
-
-        // Проверка ссылок
-        if (HasReferences(product.FileOffset))
-            throw new InvalidOperationException($"На компонент '{name}' есть ссылки в спецификациях");
-
-        SetProductDeleted(product.FileOffset, true);
+        var prod = FindProductByName(name) ?? throw new InvalidOperationException($"Компонент '{name}' не найден");
+        if (HasReferences(prod.FileOffset))
+            throw new Exception($"На компонент '{name}' есть ссылки в спецификациях");
+        prod.IsDeleted = true;
     }
 
     public void RestoreProduct(string name)
     {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
-
-        var products = GetAllProducts();
-        foreach (var product in products)
-        {
-            if (name == "*" || product.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            {
-                SetProductDeleted(product.FileOffset, false);
-            }
-        }
-
+        var prods = name == "*" ? _products : _products.Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        foreach (var p in prods) p.IsDeleted = false;
         if (name != "*")
         {
-            SortProducts();
+            _products.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
         }
     }
 
     public void RestoreAll() => RestoreProduct("*");
 
-    public void Truncate()
-    {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
-
-        // Сохраняем активные продукты и спецификации
-        var products = GetAllProducts().Where(p => !p.IsDeleted).OrderBy(p => p.Name).ToList();
-        var specs = GetAllSpecifications().Where(s => !s.spec.IsDeleted).ToList();
-
-        CloseFiles();
-
-        CreateDatabase(_productFilePath, _specFilePath);
-
-        // Словарь для маппинга старых offset продуктов на новые
-        var offsetMap = new Dictionary<int, int>();
-        // Словарь для быстрого поиска нового продукта по имени
-        var nameToNewProduct = new Dictionary<string, ProductInfo>(StringComparer.OrdinalIgnoreCase);
-
-        // Записываем продукты
-        foreach (var product in products)
-        {
-            int newOffset = AddProduct(product.Name, product.Type);
-            offsetMap[product.FileOffset] = newOffset;
-            // После добавления продукт уже можно прочитать (но мы его только что создали)
-            var newProduct = ReadProduct(newOffset);
-            nameToNewProduct[product.Name] = newProduct;
-        }
-
-        // Восстанавливаем спецификации
-        foreach (var (ownerOffset, spec) in specs)
-        {
-            // Ищем владельца по старому offset
-            var oldOwner = products.FirstOrDefault(p => p.FileOffset == ownerOffset);
-            if (oldOwner == null) continue;
-
-            // Находим нового владельца по имени
-            if (!nameToNewProduct.TryGetValue(oldOwner.Name, out var newOwner))
-                continue;
-
-            // Маппим компонент спецификации
-            if (!offsetMap.TryGetValue(spec.ProductFilePtr, out int newComponentOffset))
-                continue;
-
-            // Добавляем запись в спецификацию нового владельца
-            AddToSpecification(newOwner.SpecFilePtr, newComponentOffset, spec.Multiplicity);
-        }
-    }
-    
-    public void PrintSpecification(string name, int indent = 0)
-    {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
-
-        var product = FindProductByName(name);
-        if (product == null) throw new InvalidOperationException($"Компонент '{name}' не найден");
-
-        if (product.Type == ComponentType.Detail)
-            throw new InvalidOperationException("Нельзя вывести спецификацию детали");
-
-        var visitedProducts = new HashSet<int>();
-        PrintSpecRecursive(product, indent, visitedProducts);
-    }
+    public void Truncate() => SaveChanges();
 
     public void PrintAllProducts()
     {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
-
-        var products = GetAllProducts().Where(p => !p.IsDeleted).OrderBy(p => p.Name);
-        foreach (var product in products)
-            Console.WriteLine($"{product.Name,-15} {product.Type}");
+        var toPrint = _products.Where(p => !p.IsDeleted).OrderBy(p => p.Name);
+        foreach (var p in toPrint)
+        {
+            Console.WriteLine($"{p.Name, 0} --- {p.Type}");
+        }
     }
+
+    public void PrintSpecification(string name)
+    {
+        var prod = FindProductByName(name) ?? throw new InvalidOperationException($"Компонент '{name}' не найден");
+        if (prod.Type == ComponentType.Detail) throw new InvalidOperationException("Нельзя вывести спецификацию детали");
+        PrintSpecRecursive(prod, 0, new HashSet<int>());
+    }
+
+    private void PrintSpecRecursive(ProductInfo product, int indent, HashSet<int> visited)
+    {
+        if (indent > 100) { Console.WriteLine($"{new string(' ', indent * 2)}... (глубокая вложенность)"); return; }
+        if (visited.Contains(product.FileOffset))
+        {
+            Console.WriteLine($"{new string('|', indent)} {product.Name} (циклическая ссылка)");
+            return;
+        }
+        visited.Add(product.FileOffset);
+
+        string prefix = indent > 0 ? new string('|', indent - 1) + " " : "";
+        Console.WriteLine($"{prefix}{product.Name} ({product.Type})");
+
+        var specs = _specs.Where(s => !s.IsDeleted && s.OwnerOffset == product.FileOffset).ToList();
+        foreach (var spec in specs)
+        {
+            var comp = _products.FirstOrDefault(p => p.FileOffset == spec.ProductFilePtr && !p.IsDeleted);
+            if (comp == null) continue;
+
+            string mult = spec.Multiplicity > 1 ? $" x{spec.Multiplicity}" : "";
+            string childPrefix = new string('|', indent) + " ";
+            Console.WriteLine($"{childPrefix}{comp.Name} ({comp.Type}){mult}");
+
+            if (comp.SpecFilePtr != -1)
+                PrintSpecRecursive(comp, indent + 1, visited);
+        }
+
+        visited.Remove(product.FileOffset);
+    }
+
+    private bool HasReferences(int productOffset) =>
+        _specs.Any(s => !s.IsDeleted && s.ProductFilePtr == productOffset);
+
+    private void CloseFiles()
+    {
+        if (IsOpen) SaveChanges();
+        _productStream?.Flush(); _productStream?.Close(); _productStream = null;
+        _specStream?.Flush(); _specStream?.Close(); _specStream = null;
+        IsOpen = false;
+    }
+
+    // private bool IsComponentInSpecification(int specHeaderOffset, int componentOffset)
+    // {
+    //     _specStream!.Position = specHeaderOffset;
+    //     byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
+    //     _specStream.ReadExactly(headerBytes);
+    //     var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
+    //
+    //     int ptr = specHeader.FirstRecordPtr;
+    //     int count = 0;
+    //     while (ptr != -1 && ptr < _specStream.Length && count < 10000)
+    //     {
+    //         _specStream.Position = ptr;
+    //         byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
+    //         _specStream.ReadExactly(recordBytes);
+    //         var record = ByteArrayToStructure<SpecRecord>(recordBytes);
+    //
+    //         if (record.IsDeleted == 0 && record.ProductFilePtr == componentOffset)
+    //             return true;
+    //
+    //         ptr = record.NextRecordPtr;
+    //         count++;
+    //     }
+    //
+    //     return false;
+    // }
 
     private ProductInfo ReadProduct(int offset)
     {
-        if (!IsOpen) throw new InvalidOperationException("База данных не открыта");
+        if (!IsOpen) throw new Exception("База данных не открыта");
 
         _productStream!.Position = offset;
         byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
@@ -316,219 +431,89 @@ public class FileManager : IDisposable
         };
     }
 
-    private List<ProductInfo> GetAllProducts()
-    {
-        var products = new List<ProductInfo>();
-        if (!IsOpen) return products;
+    // private List<ProductInfo> GetAllProducts()
+    // {
+    //     var products = new List<ProductInfo>();
+    //     if (!IsOpen) return products;
+    //
+    //     var visitedOffsets = new HashSet<int>();
+    //     int ptr = _productHeader.FirstRecordPtr;
+    //     while (ptr != -1 && ptr < _productStream!.Length && !visitedOffsets.Contains(ptr))
+    //     {
+    //         visitedOffsets.Add(ptr);
+    //         var product = ReadProduct(ptr);
+    //         products.Add(product);
+    //         ptr = GetNextProductPtr(ptr);
+    //
+    //         if (products.Count > 10000) break;
+    //     }
+    //     return products;
+    // }
 
-        var visitedOffsets = new HashSet<int>();
-        int ptr = _productHeader.FirstRecordPtr;
-        while (ptr != -1 && ptr < _productStream!.Length && !visitedOffsets.Contains(ptr))
-        {
-            visitedOffsets.Add(ptr);
-            var product = ReadProduct(ptr);
-            products.Add(product);
-            ptr = GetNextProductPtr(ptr);
+    // private int GetNextProductPtr(int offset)
+    // {
+    //     _productStream!.Position = offset + 1 + 4;
+    //     byte[] ptrBytes = new byte[4];
+    //     _productStream.ReadExactly(ptrBytes, 0, 4);
+    //     return BitConverter.ToInt32(ptrBytes, 0);
+    // }
 
-            if (products.Count > 10000) break;
-        }
-        return products;
-    }
+    // private void SetProductDeleted(int offset, bool deleted)
+    // {
+    //     _productStream!.Position = offset;
+    //     byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
+    //     _productStream.ReadExactly(recordBytes);
+    //     var record = ByteArrayToStructure<ProductRecord>(recordBytes);
+    //     record.IsDeleted = (sbyte)(deleted ? -1 : 0);
+    //
+    //     _productStream.Position = offset;
+    //     byte[] newRecordBytes = StructureToByteArray(record);
+    //     _productStream.Write(newRecordBytes, 0, newRecordBytes.Length);
+    // }
 
-    private void CloseFiles()
-    {
-        if (IsOpen)
-        {
-            WriteProductHeader();
-            WriteSpecHeader();
-        }
-
-        _productStream?.Flush();
-        _productStream?.Close();
-        _productStream = null;
-
-        _specStream?.Flush();
-        _specStream?.Close();
-        _specStream = null;
-
-        IsOpen = false;
-    }
-
-    private int GetNextProductPtr(int offset)
-    {
-        _productStream!.Position = offset + 1 + 4;
-        byte[] ptrBytes = new byte[4];
-        _productStream.ReadExactly(ptrBytes, 0, 4);
-        return BitConverter.ToInt32(ptrBytes, 0);
-    }
-
-    private bool HasReferences(int productOffset)
-    {
-        _specStream!.Position = 0;
-        byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-        _specStream.ReadExactly(headerBytes);
-        var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
-
-        int ptr = specHeader.FirstRecordPtr;
-        while (ptr != -1 && ptr < _specStream.Length)
-        {
-            _specStream.Position = ptr;
-            byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-            _specStream.ReadExactly(recordBytes);
-            var record = ByteArrayToStructure<SpecRecord>(recordBytes);
-
-
-            if (record.IsDeleted == 0 && record.ProductFilePtr == productOffset)
-                return true;
-
-            ptr = record.NextRecordPtr;
-        }
-
-        return false;
-    }
-
-    private void SetProductDeleted(int offset, bool deleted)
-    {
-        _productStream!.Position = offset;
-        byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
-        _productStream.ReadExactly(recordBytes);
-        var record = ByteArrayToStructure<ProductRecord>(recordBytes);
-        record.IsDeleted = (sbyte)(deleted ? -1 : 0);
-
-        _productStream.Position = offset;
-        byte[] newRecordBytes = StructureToByteArray(record);
-        _productStream.Write(newRecordBytes, 0, newRecordBytes.Length);
-    }
-
-    private void SortProducts()
-    {
-        var products = GetAllProducts();
-        var activeProducts = products.Where(p => !p.IsDeleted).OrderBy(p => p.Name).ToList();
-        
-        Truncate();
-    }
-
-    private List<(int ownerOffset, SpecInfo spec)> GetAllSpecifications()
-    {
-        var result = new List<(int, SpecInfo)>();
-        if (!IsOpen) return result;
-
-        var products = GetAllProducts();
-        foreach (var product in products)
-        {
-            if (product.SpecFilePtr == -1) continue;
-
-            _specStream!.Position = product.SpecFilePtr;
-            byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-            _specStream.ReadExactly(headerBytes);
-            var header = ByteArrayToStructure<SpecFileHeader>(headerBytes);
-
-            int ptr = header.FirstRecordPtr;
-            int count = 0;
-            while (ptr != -1 && ptr < _specStream.Length && count < 10000)
-            {
-                _specStream.Position = ptr;
-                byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-                _specStream.ReadExactly(recordBytes);
-                var record = ByteArrayToStructure<SpecRecord>(recordBytes);
-
-                if (record.IsDeleted == 0)
-                {
-                    result.Add((product.FileOffset, new SpecInfo
-                    {
-                        FileOffset = ptr,
-                        ProductFilePtr = record.ProductFilePtr,
-                        Multiplicity = record.Multiplicity,
-                        NextRecordPtr = record.NextRecordPtr,
-                        IsDeleted = record.IsDeleted == -1
-                    }));
-                }
-
-                ptr = record.NextRecordPtr;
-                count++;
-            }
-        }
-        return result;
-    }
-
-    private void PrintSpecRecursive(ProductInfo product, int indent, HashSet<int> visitedProducts)
-    {
-        // Защита от слишком глубокой рекурсии (дополнительно к visited)
-        if (indent > 100) 
-        {
-            Console.WriteLine($"{new string(' ', indent * 2)}... (слишком глубокая вложенность)");
-            return;
-        }
-
-        if (visitedProducts.Contains(product.FileOffset))
-        {
-            string prefix = indent > 0 ? new string('|', indent - 1) + " " : "";
-            Console.WriteLine($"{prefix}{product.Name} (циклическая ссылка)");
-            return;
-        }
-        visitedProducts.Add(product.FileOffset);
-
-        string indentStr = indent > 0 ? new string('|', indent - 1) + " " : "";
-        Console.WriteLine($"{indentStr}{product.Name} ({product.Type})");
-
-        if (product.SpecFilePtr == -1 || product.SpecFilePtr >= _specStream!.Length) 
-        {
-            visitedProducts.Remove(product.FileOffset); // всегда удаляем при выходе
-            return;
-        }
-
-        _specStream.Position = product.SpecFilePtr;
-        byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-        _specStream.ReadExactly(headerBytes);
-        var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
-
-        int ptr = specHeader.FirstRecordPtr;
-        int count = 0;
-        // Защита от зацикливания списка спецификации
-        var visitedSpecOffsets = new HashSet<int>(); 
-
-        while (ptr != -1 && ptr < _specStream.Length && count < 1000)
-        {
-            // Если уже проходили этот offset – зацикливание списка
-            if (visitedSpecOffsets.Contains(ptr))
-            {
-                Console.WriteLine($"{new string(' ', (indent+1)*2)}... (зацикливание списка спецификации)");
-                break;
-            }
-            visitedSpecOffsets.Add(ptr);
-
-            _specStream.Position = ptr;
-            byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-            _specStream.ReadExactly(recordBytes);
-            var record = ByteArrayToStructure<SpecRecord>(recordBytes);
-
-            if (record.IsDeleted == 0)
-            {
-                var component = ReadProduct(record.ProductFilePtr);
-                if (!component.IsDeleted)
-                {
-                    // Выводим компонент с учётом кратности (один раз, с указанием xN)
-                    string mult = record.Multiplicity > 1 ? $" x{record.Multiplicity}" : "";
-                    // Для красоты можно вывести дополнительную вертикальную черту
-                    string childIndent = new string('|', indent) + " ";
-                    Console.WriteLine($"{childIndent}{component.Name} ({component.Type}){mult}");
-                    
-                    // Если компонент не деталь, рекурсивно выводим его спецификацию
-                    if (component.SpecFilePtr != -1)
-                    {
-                        // Рекурсивный вызов с тем же visitedProducts
-                        PrintSpecRecursive(component, indent + 1, visitedProducts);
-                    }
-                }
-            }
-
-            ptr = record.NextRecordPtr;
-            count++;
-        }
-
-        visitedProducts.Remove(product.FileOffset);
-    }
-
+    // private List<(int ownerOffset, SpecInfo spec)> GetAllSpecifications()
+    // {
+    //     var result = new List<(int, SpecInfo)>();
+    //     if (!IsOpen) return result;
+    //
+    //     var products = GetAllProducts();
+    //     foreach (var product in products)
+    //     {
+    //         if (product.SpecFilePtr == -1) continue;
+    //
+    //         _specStream!.Position = product.SpecFilePtr;
+    //         byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
+    //         _specStream.ReadExactly(headerBytes);
+    //         var header = ByteArrayToStructure<SpecFileHeader>(headerBytes);
+    //
+    //         int ptr = header.FirstRecordPtr;
+    //         int count = 0;
+    //         while (ptr != -1 && ptr < _specStream.Length && count < 10000)
+    //         {
+    //             _specStream.Position = ptr;
+    //             byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
+    //             _specStream.ReadExactly(recordBytes);
+    //             var record = ByteArrayToStructure<SpecRecord>(recordBytes);
+    //
+    //             if (record.IsDeleted == 0)
+    //             {
+    //                 result.Add((product.FileOffset, new SpecInfo
+    //                 {
+    //                     FileOffset = ptr,
+    //                     ProductFilePtr = record.ProductFilePtr,
+    //                     Multiplicity = record.Multiplicity,
+    //                     NextRecordPtr = record.NextRecordPtr,
+    //                     IsDeleted = record.IsDeleted == -1
+    //                 }));
+    //             }
+    //
+    //             ptr = record.NextRecordPtr;
+    //             count++;
+    //         }
+    //     }
+    //     return result;
+    // }
+    
     private void ReadProductHeader()
     {
         _productStream!.Position = 0;
@@ -552,30 +537,13 @@ public class FileManager : IDisposable
         _specStream.ReadExactly(buffer);
         _specHeader = ByteArrayToStructure<SpecFileHeader>(buffer);
     }
-
-
+        
     private void WriteSpecHeader()
     {
         if (_specStream == null) return;
         _specStream.Position = 0;
         byte[] buffer = StructureToByteArray(_specHeader);
         _specStream.Write(buffer, 0, buffer.Length);
-    }
-
-    private int CreateSpecList()
-    {
-        int position = (int)_specStream!.Length;
-        var header = new SpecFileHeader
-        {
-            FirstRecordPtr = -1,
-            FreeAreaPtr = position + Marshal.SizeOf<SpecFileHeader>()
-        };
-
-        _specStream.Position = position;
-        byte[] buffer = StructureToByteArray(header);
-        _specStream.Write(buffer, 0, buffer.Length);
-
-        return position;
     }
 
     private T ByteArrayToStructure<T>(byte[] bytes) where T : struct
@@ -591,11 +559,11 @@ public class FileManager : IDisposable
         }
     }
 
-    private byte[] StructureToByteArray<T>(T structure) where T : struct
+    private static byte[] StructureToByteArray<T>(T structure) where T : struct
     {
-        int size = Marshal.SizeOf<T>();
-        byte[] bytes = new byte[size];
-        GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+        var size = Marshal.SizeOf<T>();
+        var bytes = new byte[size];
+        var handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
         try
         {
             Marshal.StructureToPtr(structure, handle.AddrOfPinnedObject(), false);

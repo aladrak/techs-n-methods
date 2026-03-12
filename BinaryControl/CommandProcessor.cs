@@ -39,14 +39,10 @@ public class CommandProcessor
 
 	private string HandleCreate(string[] parts)
 	{
-		if (parts.Length < 2) return "Использование: Create <имя файла> [длина имени] [имя спецификации]";
+		if (parts.Length < 2) return "Использование: Create <имя файла>";
 
 		string fileName = parts[1];
 		int nameLength = Sizes.DefaultNameLength;
-		string? specName = null;
-
-		if (parts.Length > 2) int.TryParse(parts[2], out nameLength);
-		if (parts.Length > 3) specName = parts[3];
 
 		if (File.Exists(fileName))
 		{
@@ -55,7 +51,7 @@ public class CommandProcessor
 			if (response?.ToLower() != "y") return "Отменено";
 		}
 
-		_fileManager.CreateDatabase(fileName, specName, (short)nameLength);
+		_fileManager.CreateDatabase(fileName, (short)nameLength);
 		return $"База данных создана: {fileName}";
 	}
 
@@ -70,13 +66,11 @@ public class CommandProcessor
 	private string HandleInput(string input)
 	{
 		if (!_fileManager.IsOpen) return "Сначала откройте или создайте базу данных";
-
-		// Input (имя, тип) или Input (имя/комплектующее)
-		// Добавление в спецификацию
+		
 		if (input.Contains('/'))
 		{
 			var match = System.Text.RegularExpressions.Regex.Match(input, @"\(([^/]+)/([^)]+)\)");
-			if (!match.Success) return "Неверный формат. Используйте: Input (имя/комплектующее)";
+			if (!match.Success) return "Неверный формат. Input (имя/комплектующее)";
 
 			string componentName = match.Groups[1].Value.Trim();
 			string partName = match.Groups[2].Value.Trim();
@@ -90,11 +84,10 @@ public class CommandProcessor
 			_fileManager.AddToSpecification(component.FileOffset, part.FileOffset, 1);
 			return $"Добавлено '{partName}' в спецификацию '{componentName}'";
 		}
-		// Добавление компонента
 		else
 		{
 			var match = System.Text.RegularExpressions.Regex.Match(input, @"\(([^,]+),\s*([^)]+)\)");
-			if (!match.Success) return "Неверный формат. Используйте: Input (имя, тип)";
+			if (!match.Success) return "Неверный формат. Input (имя, тип) или Input (имя/комплектующее)";
 
 			string name = match.Groups[1].Value.Trim();
 			string typeStr = match.Groups[2].Value.Trim();

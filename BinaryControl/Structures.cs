@@ -29,7 +29,7 @@ public struct ProductFileHeader
 	{
 		var header = new ProductFileHeader
 		{
-			Signature = new byte[] { (byte)'P', (byte)'S' },
+			Signature = new []{ (byte)'P', (byte)'S' },
 			DataLength = dataLength,
 			FirstRecordPtr = -1,
 			FreeAreaPtr = Marshal.SizeOf<ProductFileHeader>(),
@@ -42,9 +42,10 @@ public struct ProductFileHeader
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct ProductRecord
 {
-	public sbyte IsDeleted;
-	public int SpecFilePtr;
-	public int NextRecordPtr;
+	public sbyte IsDeleted; // 1
+	public int SpecFilePtr; // 4
+	public int NextRecordPtr; // 4
+	public sbyte Type; // 1
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -66,10 +67,10 @@ public struct SpecFileHeader
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SpecRecord
 {
-	public sbyte IsDeleted;
-	public int ProductFilePtr;
-	public short Multiplicity;
-	public int NextRecordPtr;
+	public sbyte IsDeleted; // 1
+	public int ProductFilePtr; // 4
+	public short Multiplicity; // 2
+	public int NextRecordPtr; // 4
 }
 
 public enum ComponentType
@@ -95,4 +96,5 @@ public class SpecInfo
 	public short Multiplicity { get; set; }
 	public int NextRecordPtr { get; set; }
 	public bool IsDeleted { get; set; }
+	public int OwnerOffset { get; set; }
 }

@@ -27,25 +27,24 @@ public struct ProductFileHeader
 
 	public static ProductFileHeader Create(string specFileName, short dataLength = Sizes.DefaultNameLength)
 	{
-		var header = new ProductFileHeader
+		return new ProductFileHeader
 		{
-			Signature = new []{ (byte)'P', (byte)'S' },
+			Signature = new byte[] { (byte)'P', (byte)'S' },
 			DataLength = dataLength,
 			FirstRecordPtr = -1,
 			FreeAreaPtr = Marshal.SizeOf<ProductFileHeader>(),
 			SpecFileName = Encoding.ASCII.GetBytes(specFileName.PadRight(Sizes.FileNameSize).Substring(0, Sizes.FileNameSize))
 		};
-		return header;
 	}
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct ProductRecord
 {
-	public sbyte IsDeleted; // 1
-	public int SpecFilePtr; // 4
-	public int NextRecordPtr; // 4
-	public sbyte Type; // 1
+	public sbyte IsDeleted;
+	public int SpecFilePtr;
+	public int NextRecordPtr;
+	public sbyte Type; // 0-Product, 1-Node, 2-Detail
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]

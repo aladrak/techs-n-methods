@@ -2,7 +2,7 @@
 
 class Program
 {
-	private static void Main(string[] args)
+	private static void Main()
 	{
 		var fileManager = new FileManager();
 		var processor = new CommandProcessor(fileManager);
@@ -23,7 +23,7 @@ class Program
 			if (!string.IsNullOrEmpty(result))
 				Console.WriteLine(result);
 
-			if (input.Trim().ToLower() == "exit")
+			if (input.Trim().Equals("exit", StringComparison.CurrentCultureIgnoreCase))
 				break;
 		}
 

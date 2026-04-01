@@ -1,4 +1,5 @@
-﻿namespace BinaryControl;
+﻿using BinaryControlLib;
+namespace BinaryControl;
 
 class Program
 {

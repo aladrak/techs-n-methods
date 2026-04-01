@@ -1,4 +1,5 @@
-﻿namespace BinaryControl;
+﻿using BinaryControlLib;
+namespace BinaryControl;
 public class CommandProcessor
 {
 	private readonly FileManager _fileManager;

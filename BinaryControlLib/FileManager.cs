@@ -1,7 +1,8 @@
 ﻿using System.Runtime.InteropServices;
 using System.Text;
 
-namespace BinaryControl;
+namespace BinaryControlLib;
+
 public class FileManager : IDisposable
 {
     private FileStream? _productStream;
@@ -23,34 +24,6 @@ public class FileManager : IDisposable
     public IEnumerable<SpecInfo> GetSpecsForProduct(int productOffset) =>
         _specs.Where(s => s.OwnerOffset == productOffset && !s.IsDeleted);
     
-    public void Reload()
-    {
-        if (!IsOpen) throw new InvalidOperationException("База не открыта");
-        _products.Clear();
-        _specs.Clear();
-        LoadFromFiles();
-    }
-
-    public void UpdateProduct(ProductInfo updatedProduct)
-    {
-        var prod = _products.FirstOrDefault(p => p.FileOffset == updatedProduct.FileOffset);
-        if (prod != null)
-        {
-            prod.Name = updatedProduct.Name;
-            prod.Type = updatedProduct.Type;
-            prod.SpecFilePtr = updatedProduct.Type == ComponentType.Detail ? -1 : 0;
-        }
-    } 
-
-    public void UpdateSpec(SpecInfo updatedSpec)
-    {
-        var spec = _specs.FirstOrDefault(s => s.FileOffset == updatedSpec.FileOffset);
-        if (spec != null)
-        {
-            spec.Multiplicity = updatedSpec.Multiplicity;
-        }
-    }
-
     public void Dispose() => CloseFiles();
 
     public void CreateDatabase(string productName, short nameLength = Sizes.DefaultNameLength)
@@ -60,8 +33,8 @@ public class FileManager : IDisposable
         _specs.Clear();
         _nextTempId = -1;
 
-        _productFilePath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\Binfile\\" + productName + ".prd";
-        _specFilePath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\Binfile\\" + productName + ".prs";
+        _productFilePath = FolderPath(productName + ".prd");
+        _specFilePath = FolderPath(productName + ".prs");
 
         _productHeader = ProductFileHeader.Create(Path.GetFileName(_specFilePath), nameLength);
         _specHeader = SpecFileHeader.Create();
@@ -82,8 +55,8 @@ public class FileManager : IDisposable
         _specs.Clear();
         _nextTempId = -1;
 
-        _productFilePath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\Binfile\\" + productName + ".prd";
-        _specFilePath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) + "\\Binfile\\" + productName + ".prs";
+        _productFilePath = FolderPath(productName + ".prd");
+        _specFilePath = FolderPath(productName + ".prs");
 
         if (!File.Exists(_productFilePath)) throw new Exception($"Файл {_productFilePath} не найден");
         if (!File.Exists(_specFilePath)) throw new Exception($"Файл спецификаций {_specFilePath} не найден");
@@ -103,13 +76,18 @@ public class FileManager : IDisposable
 
     private void LoadFromFiles()
     {
+        _products.Clear();
+        _specs.Clear();
+
         int ptr = _productHeader.FirstRecordPtr;
         var visited = new HashSet<int>();
         int index = 0;
+        
         while (ptr != -1 && ptr < _productStream!.Length && !visited.Contains(ptr))
         {
             visited.Add(ptr);
             _productStream.Position = ptr;
+            
             byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
             _productStream.ReadExactly(recordBytes);
             var record = ByteArrayToStructure<ProductRecord>(recordBytes);
@@ -117,6 +95,12 @@ public class FileManager : IDisposable
             byte[] nameBytes = new byte[_productHeader.DataLength];
             _productStream.ReadExactly(nameBytes);
             string name = Encoding.ASCII.GetString(nameBytes).TrimEnd();
+
+            if (record.IsDeleted == -1)
+            {
+                ptr = record.NextRecordPtr;
+                continue;
+            }
 
             ComponentType type;
             if (index == 0)
@@ -129,20 +113,39 @@ public class FileManager : IDisposable
                 FileOffset = ptr,
                 Name = name,
                 SpecFilePtr = record.SpecFilePtr,
-                IsDeleted = record.IsDeleted == -1,
+                IsDeleted = false,
                 Type = type
             });
+            
             ptr = record.NextRecordPtr;
             index++;
         }
 
+        // Чтение спецификаций
         _specStream!.Position = Marshal.SizeOf<SpecFileHeader>();
+        var specVisited = new HashSet<int>();
+        
         while (_specStream.Position + Marshal.SizeOf<SpecRecord>() <= _specStream.Length)
         {
             long startPos = _specStream.Position;
+            
+            if (specVisited.Contains((int)startPos))
+                break;
+            specVisited.Add((int)startPos);
+            
             byte[] recBytes = new byte[Marshal.SizeOf<SpecRecord>()];
             _specStream.ReadExactly(recBytes);
             var rec = ByteArrayToStructure<SpecRecord>(recBytes);
+
+            // Пропускаем логически удалённые
+            if (rec.IsDeleted == -1)
+            {
+                if (rec.NextRecordPtr != -1)
+                    _specStream.Position = rec.NextRecordPtr;
+                else
+                    break;
+                continue;
+            }
 
             _specs.Add(new SpecInfo
             {
@@ -150,20 +153,29 @@ public class FileManager : IDisposable
                 ProductFilePtr = rec.ProductFilePtr,
                 Multiplicity = rec.Multiplicity,
                 NextRecordPtr = rec.NextRecordPtr,
-                IsDeleted = rec.IsDeleted == -1,
+                IsDeleted = false,
                 OwnerOffset = -1
             });
+            
+            if (rec.NextRecordPtr != -1)
+                _specStream.Position = rec.NextRecordPtr;
+            else
+                break;
         }
 
+        // Связывание спецификаций с продуктами
         foreach (var prod in _products)
         {
             if (prod.SpecFilePtr == -1) continue;
+            
             int specPtr = prod.SpecFilePtr;
             int count = 0;
+            
             while (specPtr != -1 && count < 10000)
             {
                 var spec = _specs.FirstOrDefault(s => s.FileOffset == specPtr);
                 if (spec == null) break;
+                
                 spec.OwnerOffset = prod.FileOffset;
                 specPtr = spec.NextRecordPtr;
                 count++;
@@ -177,129 +189,131 @@ public class FileManager : IDisposable
 
         var activeProducts = _products.Where(p => !p.IsDeleted).ToList();
         var activeSpecs = _specs.Where(s => !s.IsDeleted).ToList();
-
-        _productStream?.Close();
-        _specStream?.Close();
-
-        _productStream = new FileStream(_productFilePath, FileMode.Create, FileAccess.ReadWrite);
-        _specStream = new FileStream(_specFilePath, FileMode.Create, FileAccess.ReadWrite);
-
+        
+        var product = activeProducts.FirstOrDefault(p => p.Type == ComponentType.Product);
+        var others = activeProducts.Where(p => p.Type != ComponentType.Product)
+                                   .OrderBy(p => p.Name).ToList();
+        var orderedProducts = new List<ProductInfo>();
+        if (product != null) orderedProducts.Add(product);
+        orderedProducts.AddRange(others);
+        
+        _productStream!.SetLength(0); _productStream.Position = 0;
+        _specStream!.SetLength(0); _specStream.Position = 0;
+        
+        // Инициализация заголовков
         _productHeader = ProductFileHeader.Create(Path.GetFileName(_specFilePath), _productHeader.DataLength);
         _specHeader = SpecFileHeader.Create();
         WriteProductHeader();
         WriteSpecHeader();
-        
-        var productEntry = activeProducts.FirstOrDefault(p => p.Type == ComponentType.Product);
-        var nodesAndDetails = activeProducts.Where(p => p.Type != ComponentType.Product)
-                                            .OrderBy(p => p.Name).ToList();
-        var orderedProducts = new List<ProductInfo>();
-        if (productEntry != null)
-            orderedProducts.Add(productEntry);
-        orderedProducts.AddRange(nodesAndDetails);
 
-        var productNameToNewOffset = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var productOldToNew = new Dictionary<int, int>();
-        
-        foreach (var prod in orderedProducts)
+        int productHeaderSize = Marshal.SizeOf<ProductFileHeader>();
+        int productRecordSize = Marshal.SizeOf<ProductRecord>() + _productHeader.DataLength;
+        int specHeaderSize = Marshal.SizeOf<SpecFileHeader>();
+        int specRecordSize = Marshal.SizeOf<SpecRecord>();
+
+        // Вычисляем новые смещения продуктов
+        var oldToNewProduct = new Dictionary<int, int>();
+        for (int i = 0; i < orderedProducts.Count; i++)
         {
-            int recordOffset = (int)_productStream!.Position;
-            productNameToNewOffset[prod.Name] = recordOffset;
-            productOldToNew[prod.FileOffset] = recordOffset;
+            oldToNewProduct[orderedProducts[i].FileOffset] = productHeaderSize + i * productRecordSize;
+        }
+
+        var specsByOwner = activeSpecs.GroupBy(s => s.OwnerOffset).ToDictionary(g => g.Key, g => g.ToList());
+        var ownerToFirstSpec = new Dictionary<int, int>();
+        
+        int currentSpecOffset = specHeaderSize;
+        foreach (var prod in orderedProducts.Where(p => p.Type != ComponentType.Detail))
+        {
+            if (specsByOwner.TryGetValue(prod.FileOffset, out var list) && list.Count > 0)
+            {
+                ownerToFirstSpec[prod.FileOffset] = currentSpecOffset;
+                currentSpecOffset += list.Count * specRecordSize;
+            }
+        }
+
+        // Записываем продукты
+        for (int i = 0; i < orderedProducts.Count; i++)
+        {
+            var prod = orderedProducts[i];
+            int newOffset = oldToNewProduct[prod.FileOffset];
+            int nextPtr = (i < orderedProducts.Count - 1) ? newOffset + productRecordSize : -1;
+            int specPtr = (prod.Type != ComponentType.Detail && ownerToFirstSpec.TryGetValue(prod.FileOffset, out var sp)) ? sp : -1;
+            if (specPtr == -1 && prod.Type == ComponentType.Node) specPtr = 0;
 
             var record = new ProductRecord
             {
                 IsDeleted = 0,
-                SpecFilePtr = -1,
-                NextRecordPtr = -1
+                SpecFilePtr = specPtr,
+                NextRecordPtr = nextPtr
             };
-            byte[] recBytes = StructureToByteArray(record);
-            _productStream.Write(recBytes, 0, recBytes.Length);
 
-            byte[] nameBytes = Encoding.ASCII.GetBytes(prod.Name.PadRight(_productHeader.DataLength)[.._productHeader.DataLength]);
+            _productStream.Position = newOffset;
+            _productStream.Write(StructureToByteArray(record), 0, Marshal.SizeOf<ProductRecord>());
+            
+            byte[] nameBytes = Encoding.ASCII.GetBytes(
+                prod.Name.PadRight(_productHeader.DataLength)[.._productHeader.DataLength]);
             _productStream.Write(nameBytes, 0, nameBytes.Length);
         }
-        
-        var productOffsets = orderedProducts.Select(p => productNameToNewOffset[p.Name]).ToList();
-        for (int i = 0; i < productOffsets.Count; i++)
-        {
-            int nextPtr = (i < productOffsets.Count - 1) ? productOffsets[i + 1] : -1;
-            _productStream!.Position = productOffsets[i] + 1 + 4; // IsDeleted + SpecFilePtr
-            byte[] nextBytes = BitConverter.GetBytes(nextPtr);
-            _productStream.Write(nextBytes, 0, 4);
-        }
 
-        _productHeader.FirstRecordPtr = productOffsets.Count > 0 ? productOffsets[0] : -1;
-        _productHeader.FreeAreaPtr = (int)_productStream!.Position;
-        
-        var specsByOwner = activeSpecs
-            .Where(s => productOldToNew.ContainsKey(s.OwnerOffset) && productOldToNew.ContainsKey(s.ProductFilePtr))
-            .GroupBy(s => s.OwnerOffset)
-            .ToDictionary(g => g.Key, g => g.ToList());
-        
-        var ownerRecordOffsets = new Dictionary<int, List<int>>();
-        foreach (var ownerOldOffset in specsByOwner.Keys)
+        // Записываем спецификации
+        foreach (var prod in orderedProducts.Where(p => p.Type != ComponentType.Detail))
         {
-            var specList = specsByOwner[ownerOldOffset];
-            var offsets = new List<int>();
-
-            foreach (var spec in specList)
+            if (!specsByOwner.TryGetValue(prod.FileOffset, out var specList)) continue;
+            
+            for (int i = 0; i < specList.Count; i++)
             {
-                int recOffset = (int)_specStream!.Position;
-                offsets.Add(recOffset);
-
-                int newCompOffset = productOldToNew[spec.ProductFilePtr];
+                var spec = specList[i];
+                int newOffset = ownerToFirstSpec[prod.FileOffset] + i * specRecordSize;
+                int nextPtr = (i < specList.Count - 1) ? newOffset + specRecordSize : -1;
+                int newCompOffset = oldToNewProduct[spec.ProductFilePtr];
 
                 var specRecord = new SpecRecord
                 {
                     IsDeleted = 0,
                     ProductFilePtr = newCompOffset,
                     Multiplicity = spec.Multiplicity,
-                    NextRecordPtr = -1
+                    NextRecordPtr = nextPtr
                 };
-                byte[] recBytes = StructureToByteArray(specRecord);
-                _specStream.Write(recBytes, 0, recBytes.Length);
-            }
 
-            ownerRecordOffsets[ownerOldOffset] = offsets;
-        }
-        
-        foreach (var kv in ownerRecordOffsets)
-        {
-            var offsets = kv.Value;
-            for (int i = 0; i < offsets.Count; i++)
-            {
-                int nextPtr = (i < offsets.Count - 1) ? offsets[i + 1] : -1;
-                _specStream!.Position = offsets[i] + 1 + 4 + 2; // IsDeleted + ProductFilePtr + Multiplicity
-                byte[] nextBytes = BitConverter.GetBytes(nextPtr);
-                _specStream.Write(nextBytes, 0, 4);
+                _specStream.Position = newOffset;
+                _specStream.Write(StructureToByteArray(specRecord), 0, Marshal.SizeOf<SpecRecord>());
             }
         }
 
-        foreach (var prod in orderedProducts.Where(p => p.Type != ComponentType.Detail))
-        {
-            int newProdOffset = productOldToNew[prod.FileOffset];
-            int firstSpecOffset = -1;
-
-            if (ownerRecordOffsets.TryGetValue(prod.FileOffset, out var offsets) && offsets.Count > 0)
-                firstSpecOffset = offsets[0];
-
-            _productStream!.Position = newProdOffset + 1; // после IsDeleted
-            byte[] ptrBytes = BitConverter.GetBytes(firstSpecOffset);
-            _productStream.Write(ptrBytes, 0, 4);
-        }
-
-        if (_specStream.Length > Marshal.SizeOf<SpecFileHeader>())
-            _specHeader.FirstRecordPtr = Marshal.SizeOf<SpecFileHeader>();
-        else
-            _specHeader.FirstRecordPtr = -1;
+        // Финализируем заголовки
+        _productHeader.FirstRecordPtr = orderedProducts.Count > 0 ? productHeaderSize : -1;
+        _productHeader.FreeAreaPtr = (int)_productStream.Length;
+        _specHeader.FirstRecordPtr = activeSpecs.Any() ? specHeaderSize : -1;
         _specHeader.FreeAreaPtr = (int)_specStream.Length;
         
-        WriteSpecHeader();
         WriteProductHeader();
+        WriteSpecHeader();
 
-        _products.Clear();
-        _specs.Clear();
-        _nextTempId = -1;
+        // Обновляем объекты в памяти (чтобы индексы совпадали с файлом)
+        for (int i = 0; i < orderedProducts.Count; i++)
+        {
+            var prod = orderedProducts[i];
+            prod.FileOffset = productHeaderSize + i * productRecordSize;
+            prod.SpecFilePtr = (prod.Type != ComponentType.Detail && ownerToFirstSpec.TryGetValue(prod.FileOffset, out var sp)) ? sp : -1;
+        }
+
+        int specCounter = specHeaderSize;
+        foreach (var prod in orderedProducts.Where(p => p.Type != ComponentType.Detail))
+        {
+            if (!specsByOwner.TryGetValue(prod.FileOffset, out var list)) continue;
+            foreach (var spec in list)
+            {
+                spec.FileOffset = specCounter;
+                spec.OwnerOffset = prod.FileOffset;
+                spec.ProductFilePtr = oldToNewProduct[spec.ProductFilePtr];
+                specCounter += specRecordSize;
+            }
+        }
+
+        // Удаляем логически удалённые
+        _products.RemoveAll(p => p.IsDeleted);
+        _specs.RemoveAll(s => s.IsDeleted);
+        
         LoadFromFiles();
     }
 
@@ -392,14 +406,6 @@ public class FileManager : IDisposable
     private void PrintSpecRecursive(ProductInfo product, int indent)
     {
         if (indent > 100) { Console.WriteLine($"{new string(' ', indent * 2)}... (глубокая вложенность)"); return; }
-        // if (!visited.Add(product.FileOffset))
-        // {
-        //     Console.WriteLine($"{new string('|', indent)} {product.Name} (циклическая ссылка)");
-        //     return;
-        // }
-
-        // string prefix = indent > 0 ? new string('|', indent - 1) + " " : "";
-        // Console.WriteLine($"{prefix}{product.Name} ({product.Type})");
 
         var specs = _specs.Where(s => !s.IsDeleted && s.OwnerOffset == product.FileOffset).ToList();
         foreach (var spec in specs)
@@ -487,6 +493,8 @@ public class FileManager : IDisposable
         }
         return bytes;
     }
+    
+    private static string FolderPath(string filename) => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)+ "\\Binfile\\" + filename;
 
     // private bool IsComponentInSpecification(int specHeaderOffset, int componentOffset)
     // {

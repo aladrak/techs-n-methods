@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using System.Text;
 
-namespace BinaryControl;
+namespace BinaryControlLib;
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct ProductFileHeader

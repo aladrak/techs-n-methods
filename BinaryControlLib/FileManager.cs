@@ -123,61 +123,44 @@ public class FileManager : IDisposable
 
         // Чтение спецификаций
         _specStream!.Position = Marshal.SizeOf<SpecFileHeader>();
-        var specVisited = new HashSet<int>();
-        
         while (_specStream.Position + Marshal.SizeOf<SpecRecord>() <= _specStream.Length)
         {
             long startPos = _specStream.Position;
-            
-            if (specVisited.Contains((int)startPos))
-                break;
-            specVisited.Add((int)startPos);
-            
+    
             byte[] recBytes = new byte[Marshal.SizeOf<SpecRecord>()];
             _specStream.ReadExactly(recBytes);
             var rec = ByteArrayToStructure<SpecRecord>(recBytes);
 
-            // Пропускаем логически удалённые
-            if (rec.IsDeleted == -1)
+            if (rec.IsDeleted != -1)
             {
-                if (rec.NextRecordPtr != -1)
-                    _specStream.Position = rec.NextRecordPtr;
-                else
-                    break;
-                continue;
+                _specs.Add(new SpecInfo
+                {
+                    FileOffset = (int)startPos,
+                    ProductFilePtr = rec.ProductFilePtr,
+                    Multiplicity = rec.Multiplicity,
+                    NextRecordPtr = rec.NextRecordPtr,
+                    IsDeleted = false,
+                    OwnerOffset = -1
+                });
             }
-
-            _specs.Add(new SpecInfo
-            {
-                FileOffset = (int)startPos,
-                ProductFilePtr = rec.ProductFilePtr,
-                Multiplicity = rec.Multiplicity,
-                NextRecordPtr = rec.NextRecordPtr,
-                IsDeleted = false,
-                OwnerOffset = -1
-            });
-            
-            if (rec.NextRecordPtr != -1)
-                _specStream.Position = rec.NextRecordPtr;
-            else
-                break;
+    
+            _specStream.Position = startPos + Marshal.SizeOf<SpecRecord>();
         }
 
-        // Связывание спецификаций с продуктами
         foreach (var prod in _products)
         {
             if (prod.SpecFilePtr == -1) continue;
-            
+    
             int specPtr = prod.SpecFilePtr;
             int count = 0;
-            
+    
             while (specPtr != -1 && count < 10000)
             {
                 var spec = _specs.FirstOrDefault(s => s.FileOffset == specPtr);
                 if (spec == null) break;
-                
+        
                 spec.OwnerOffset = prod.FileOffset;
-                specPtr = spec.NextRecordPtr;
+                specPtr = spec.NextRecordPtr;  // ← вот здесь используем связный список
                 count++;
             }
         }
@@ -280,7 +263,6 @@ public class FileManager : IDisposable
             }
         }
 
-        // Финализируем заголовки
         _productHeader.FirstRecordPtr = orderedProducts.Count > 0 ? productHeaderSize : -1;
         _productHeader.FreeAreaPtr = (int)_productStream.Length;
         _specHeader.FirstRecordPtr = activeSpecs.Any() ? specHeaderSize : -1;
@@ -310,7 +292,6 @@ public class FileManager : IDisposable
             }
         }
 
-        // Удаляем логически удалённые
         _products.RemoveAll(p => p.IsDeleted);
         _specs.RemoveAll(s => s.IsDeleted);
         
@@ -370,10 +351,28 @@ public class FileManager : IDisposable
 
     public void LogicalDeleteProduct(string name)
     {
-        var prod = FindProductByName(name) ?? throw new InvalidOperationException($"Компонент '{name}' не найден");
+        var prod = FindProductByName(name) ?? throw new Exception($"Компонент '{name}' не найден");
         if (HasReferences(prod.FileOffset))
             throw new Exception($"На компонент '{name}' есть ссылки в спецификациях");
         prod.IsDeleted = true;
+    }
+
+    public void RemoveFromSpecification(int ownerOffset, int componentOffset)
+    {
+        if (!IsOpen) throw new Exception("База данных не открыта");
+
+        var owner = _products.FirstOrDefault(p => p.FileOffset == ownerOffset && !p.IsDeleted)
+                    ?? throw new Exception("Владелец не найден");
+
+        var spec = _specs.FirstOrDefault(s => 
+            !s.IsDeleted && 
+            s.OwnerOffset == ownerOffset && 
+            s.ProductFilePtr == componentOffset);
+
+        if (spec == null)
+            throw new Exception("Связь не найдена в спецификации");
+
+        spec.IsDeleted = true;
     }
 
     public void RestoreProduct(string name)

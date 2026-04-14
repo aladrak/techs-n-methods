@@ -75,7 +75,7 @@ public class CommandProcessor
 
 			string componentName = match.Groups[1].Value.Trim();
 			string partName = match.Groups[2].Value.Trim();
-
+			string mult = match.Groups[3].Value.Trim();
 			var component = _fileManager.FindProductByName(componentName);
 			var part = _fileManager.FindProductByName(partName);
 

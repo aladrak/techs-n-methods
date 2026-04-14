@@ -13,6 +13,7 @@ public class MainViewModel
     private List<TreeNodeDisplay> _allNodes;
     private List<ProductInfo> _productsCache;
     private List<SpecInfo> _specsCache;
+    public ObservableCollection<ProductInfo> AllProducts { get; } = new();
     public ObservableCollection<TreeNodeDisplay> VisibleNodes { get; }
     
     public ICommand LoadCommand { get; }
@@ -70,6 +71,65 @@ public class MainViewModel
         if (LoadCommand is Command c1) c1.ChangeCanExecute();
         if (AddProductCommand is Command c2) c2.ChangeCanExecute();
         if (SaveCommand is Command c3) c3.ChangeCanExecute();
+        LoadProductList(); 
+    }
+    
+    public void LoadProductList()
+    {
+        AllProducts.Clear();
+        if (!_fileManager.IsOpen) return;
+
+        foreach (var product in _fileManager.Products)
+        {
+            AllProducts.Add(product);
+        }
+    }
+    
+    public async Task RefreshAllViewsAsync()
+    {
+        LoadProductList();         
+        await LoadDataAsync();     
+    }
+    
+    public async Task DeleteProductFlat(ProductInfo product)
+    {
+        try
+        {
+            _fileManager.LogicalDeleteProduct(product.Name);
+            await RefreshAllViewsAsync();
+        }
+        catch (Exception ex)
+        {
+            await Application.Current.MainPage.DisplayAlert("Ошибка", ex.Message, "ОК");
+        }
+    }
+    
+    public async Task RestoreProductFlat(ProductInfo product)
+    {
+        try
+        {
+            _fileManager.RestoreProduct(product.Name);
+            await RefreshAllViewsAsync();
+        }
+        catch (Exception ex)
+        {
+            await Application.Current.MainPage.DisplayAlert("Ошибка", ex.Message, "ОК");
+        }
+    }
+    
+    public async Task RenameProductFlat(ProductInfo product, string newName)
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return;
+    
+        try
+        {
+            product.Name = newName;
+            await RefreshAllViewsAsync();
+        }
+        catch (Exception ex)
+        {
+            await Application.Current.MainPage.DisplayAlert("Ошибка", ex.Message, "ОК");
+        }
     }
     
     private async Task LoadDataAsync()
@@ -93,12 +153,26 @@ public class MainViewModel
     {
         VisibleNodes.Clear();
         _allNodes = new List<TreeNodeDisplay>();
-        
-        var childPtrs = _specsCache.Select(s => s.ProductFilePtr).ToHashSet();
-        var roots = _productsCache
-            .Where(p => !childPtrs.Contains(p.FileOffset))
+    
+        var usedAsComponent = _specsCache
+            .Where(s => !s.IsDeleted)
+            .Select(s => s.ProductFilePtr)
+            .ToHashSet();
+    
+        var hasSpecification = _productsCache
+            .Where(p => p.SpecFilePtr != -1 && 
+                        _specsCache.Any(s => !s.IsDeleted && s.OwnerOffset == p.FileOffset))
+            .Select(p => p.FileOffset)
+            .ToHashSet();
+    
+        var visibleProducts = _productsCache
+            .Where(p => !p.IsDeleted && 
+                        (usedAsComponent.Contains(p.FileOffset) || hasSpecification.Contains(p.FileOffset)) || p.Type == ComponentType.Product)
             .OrderBy(p => p.Name);
-        
+    
+        var childPtrs = _specsCache.Where(s => !s.IsDeleted).Select(s => s.ProductFilePtr).ToHashSet();
+        var roots = visibleProducts.Where(p => !childPtrs.Contains(p.FileOffset));
+    
         foreach (var root in roots)
             AddNodeRecursive(root, null, 0);
     }
@@ -124,18 +198,41 @@ public class MainViewModel
         }
     }
     
+    public async Task<ProductInfo> AddProductFlatAsync(string name, ComponentType type)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Имя не может быть пустым", nameof(name));
+    
+        if (!_fileManager.IsOpen)
+            throw new InvalidOperationException("База данных не открыта");
+    
+        var offset = _fileManager.AddProduct(name, type);
+        var product = _fileManager.Products.FirstOrDefault(p => p.FileOffset == offset);
+        if (product != null)
+        {
+            AllProducts.Add(product);
+        
+            if (type != ComponentType.Detail)
+            {
+                await LoadDataAsync();
+            }
+        }
+    
+        return product;
+    }
+    
     private async Task AddConnectionAsync(TreeNodeDisplay node)
     {
         if (node?.CanHaveChildren != true || node.IsDeleted) return;
         
-        var choices = new[] { "➕ Создать новый компонент", "📦 Выбрать существующий"};
+        var choices = new[] { "Создать новый компонент", "Выбрать существующий"};
         var result = await Application.Current.MainPage.DisplayActionSheetAsync("Добавить связь", "Отмена", null, choices);
         short multiplicity = 1;
         int componentOffset;
         
         switch (result)
         {
-            case "➕ Создать новый компонент":
+            case "Создать новый компонент":
                 var types = Enum.GetNames<ComponentType>();
                 var typeResult = await Application.Current.MainPage.DisplayActionSheetAsync("Тип компонента", "Отмена", null, types);
                 if (typeResult == "Отмена" || !Enum.TryParse<ComponentType>(typeResult, out var componentType))
@@ -166,7 +263,7 @@ public class MainViewModel
                 }
                 break;
                 
-            case "📦 Выбрать существующий":
+            case "Выбрать существующий":
                 var existing = _fileManager.Products.Where(p => !p.IsDeleted).ToList();
                 if (!existing.Any())
                 {
@@ -226,39 +323,37 @@ public class MainViewModel
     private async Task DeleteNodeAsync(TreeNodeDisplay node)
     {
         if (node == null || node.IsDeleted) return;
+    
         var descendants = GetDescendantsByRefs(node).ToList();
         var count = descendants.Count;
-        
+    
         var confirmMsg = count > 0 
-            ? $"Удалить '{node.Name}' и ещё {count} компонент(а)?" 
-            : $"Удалить '{node.Name}'?";
+            ? $"Убрать '{node.Name}' и ещё {count} компонент(а) из спецификации?" 
+            : $"Убрать '{node.Name}' из спецификации?";
+    
         var confirm = await Application.Current.MainPage.DisplayAlertAsync("Подтверждение", confirmMsg, "Да", "Нет");
         if (!confirm) return;
-        
+    
         try
         {
-            // Удаляем связь из спецификации родителя
             if (node.OwnerSpec != null && !node.OwnerSpec.IsDeleted)
             {
                 _fileManager.RemoveFromSpecification(node.OwnerSpec.OwnerOffset, node.FileOffset);
             }
-            
-            var descendantList = descendants.OrderByDescending(d => d.Depth).ToList();
-            foreach (var descendant in descendantList)
+        
+            foreach (var descendant in descendants)
             {
                 if (descendant.OwnerSpec != null && !descendant.OwnerSpec.IsDeleted)
                 {
                     _fileManager.RemoveFromSpecification(descendant.OwnerSpec.OwnerOffset, descendant.FileOffset);
                 }
-                _fileManager.LogicalDeleteProduct(descendant.Name);
             }
-            
-            _fileManager.LogicalDeleteProduct(node.Name);
+        
             BuildFlatList();
         }
         catch (Exception ex)
         {
-            await Application.Current.MainPage.DisplayAlertAsync("Ошибка", ex.Message, "ОК");
+            await Application.Current.MainPage.DisplayAlert("Ошибка", ex.Message, "ОК");
         }
     }
 

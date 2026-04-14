@@ -361,18 +361,17 @@ public class FileManager : IDisposable
     {
         if (!IsOpen) throw new Exception("База данных не открыта");
 
-        var owner = _products.FirstOrDefault(p => p.FileOffset == ownerOffset && !p.IsDeleted)
+        var _ = _products.FirstOrDefault(p => p.FileOffset == ownerOffset && !p.IsDeleted)
                     ?? throw new Exception("Владелец не найден");
 
         var spec = _specs.FirstOrDefault(s => 
             !s.IsDeleted && 
             s.OwnerOffset == ownerOffset && 
-            s.ProductFilePtr == componentOffset);
-
-        if (spec == null)
-            throw new Exception("Связь не найдена в спецификации");
+            s.ProductFilePtr == componentOffset) 
+                   ?? throw new Exception("Связь не найдена в спецификации");
 
         spec.IsDeleted = true;
+        
     }
 
     public void RestoreProduct(string name)
@@ -418,6 +417,7 @@ public class FileManager : IDisposable
 
             if (comp.SpecFilePtr != -1)
                 PrintSpecRecursive(comp, indent + 1);
+            
         }
     }
 
@@ -494,113 +494,4 @@ public class FileManager : IDisposable
     }
     
     private static string FolderPath(string filename) => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)+ "\\Binfile\\" + filename;
-
-    // private bool IsComponentInSpecification(int specHeaderOffset, int componentOffset)
-    // {
-    //     _specStream!.Position = specHeaderOffset;
-    //     byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-    //     _specStream.ReadExactly(headerBytes);
-    //     var specHeader = ByteArrayToStructure<SpecFileHeader>(headerBytes);
-    //
-    //     int ptr = specHeader.FirstRecordPtr;
-    //     int count = 0;
-    //     while (ptr != -1 && ptr < _specStream.Length && count < 10000)
-    //     {
-    //         _specStream.Position = ptr;
-    //         byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-    //         _specStream.ReadExactly(recordBytes);
-    //         var record = ByteArrayToStructure<SpecRecord>(recordBytes);
-    //
-    //         if (record.IsDeleted == 0 && record.ProductFilePtr == componentOffset)
-    //             return true;
-    //
-    //         ptr = record.NextRecordPtr;
-    //         count++;
-    //     }
-    //
-    //     return false;
-    // }
-
-    // private List<ProductInfo> GetAllProducts()
-    // {
-    //     var products = new List<ProductInfo>();
-    //     if (!IsOpen) return products;
-    //
-    //     var visitedOffsets = new HashSet<int>();
-    //     int ptr = _productHeader.FirstRecordPtr;
-    //     while (ptr != -1 && ptr < _productStream!.Length && !visitedOffsets.Contains(ptr))
-    //     {
-    //         visitedOffsets.Add(ptr);
-    //         var product = ReadProduct(ptr);
-    //         products.Add(product);
-    //         ptr = GetNextProductPtr(ptr);
-    //
-    //         if (products.Count > 10000) break;
-    //     }
-    //     return products;
-    // }
-
-    // private int GetNextProductPtr(int offset)
-    // {
-    //     _productStream!.Position = offset + 1 + 4;
-    //     byte[] ptrBytes = new byte[4];
-    //     _productStream.ReadExactly(ptrBytes, 0, 4);
-    //     return BitConverter.ToInt32(ptrBytes, 0);
-    // }
-
-    // private void SetProductDeleted(int offset, bool deleted)
-    // {
-    //     _productStream!.Position = offset;
-    //     byte[] recordBytes = new byte[Marshal.SizeOf<ProductRecord>()];
-    //     _productStream.ReadExactly(recordBytes);
-    //     var record = ByteArrayToStructure<ProductRecord>(recordBytes);
-    //     record.IsDeleted = (sbyte)(deleted ? -1 : 0);
-    //
-    //     _productStream.Position = offset;
-    //     byte[] newRecordBytes = StructureToByteArray(record);
-    //     _productStream.Write(newRecordBytes, 0, newRecordBytes.Length);
-    // }
-
-    // private List<(int ownerOffset, SpecInfo spec)> GetAllSpecifications()
-    // {
-    //     var result = new List<(int, SpecInfo)>();
-    //     if (!IsOpen) return result;
-    //
-    //     var products = GetAllProducts();
-    //     foreach (var product in products)
-    //     {
-    //         if (product.SpecFilePtr == -1) continue;
-    //
-    //         _specStream!.Position = product.SpecFilePtr;
-    //         byte[] headerBytes = new byte[Marshal.SizeOf<SpecFileHeader>()];
-    //         _specStream.ReadExactly(headerBytes);
-    //         var header = ByteArrayToStructure<SpecFileHeader>(headerBytes);
-    //
-    //         int ptr = header.FirstRecordPtr;
-    //         int count = 0;
-    //         while (ptr != -1 && ptr < _specStream.Length && count < 10000)
-    //         {
-    //             _specStream.Position = ptr;
-    //             byte[] recordBytes = new byte[Marshal.SizeOf<SpecRecord>()];
-    //             _specStream.ReadExactly(recordBytes);
-    //             var record = ByteArrayToStructure<SpecRecord>(recordBytes);
-    //
-    //             if (record.IsDeleted == 0)
-    //             {
-    //                 result.Add((product.FileOffset, new SpecInfo
-    //                 {
-    //                     FileOffset = ptr,
-    //                     ProductFilePtr = record.ProductFilePtr,
-    //                     Multiplicity = record.Multiplicity,
-    //                     NextRecordPtr = record.NextRecordPtr,
-    //                     IsDeleted = record.IsDeleted == -1
-    //                 }));
-    //             }
-    //
-    //             ptr = record.NextRecordPtr;
-    //             count++;
-    //         }
-    //     }
-    //     return result;
-    // }
 }

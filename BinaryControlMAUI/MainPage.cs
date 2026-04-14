@@ -1,5 +1,6 @@
 ﻿using BinaryControlMAUI.Drawables;
 using BinaryControlMAUI.ViewModels;
+using BinaryControlMAUI.Views;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using DataTemplate = Microsoft.Maui.Controls.DataTemplate;
 using GridLength = Microsoft.Maui.GridLength;
@@ -25,15 +26,6 @@ public class MainPage : ContentPage
         BackgroundColor = Colors.White;
         SetupToolbar();
         
-        // _statusLabel = new Label
-        // {
-        //     FontSize = 12,
-        //     TextColor = Colors.Gray,
-        //     Padding = new Thickness(8, 2),
-        //     BackgroundColor = Colors.LightGray
-        // };
-        // _statusLabel.SetBinding(Label.TextProperty, nameof(MainViewModel.StatusMessage));
-        
         _collectionView = new CollectionView
         {
             ItemsSource = _viewModel.VisibleNodes,
@@ -54,14 +46,18 @@ public class MainPage : ContentPage
     
     private void SetupToolbar()
     {
-        ToolbarItems.Add(new ToolbarItem("📂 Загрузить", null, 
+        ToolbarItems.Add(new ToolbarItem("Загрузить", null, 
             () => _viewModel.LoadCommand.Execute(null), ToolbarItemOrder.Primary, 0));
         
-        ToolbarItems.Add(new ToolbarItem("💾 Сохранить", null, 
+        ToolbarItems.Add(new ToolbarItem("Сохранить", null, 
             () => _viewModel.SaveCommand.Execute(null), ToolbarItemOrder.Primary, 1));
         
-        ToolbarItems.Add(new ToolbarItem("➕ Добавить корень", null, 
+        ToolbarItems.Add(new ToolbarItem("Добавить корень", null, 
             () => _viewModel.AddProductCommand.Execute(null), ToolbarItemOrder.Primary, 2));
+        
+        ToolbarItems.Add(new ToolbarItem("Изделия", null, 
+            async () => await Navigation.PushAsync(new ProductListPage(_viewModel)), 
+            ToolbarItemOrder.Secondary, 0));
     }
     
     private async void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -70,12 +66,12 @@ public class MainPage : ContentPage
         var actions = new List<string>();
     
         if (node is { IsDeleted: false, CanHaveChildren: true })
-            actions.Add("➕ Добавить связь");
+            actions.Add("Добавить связь");
     
         if (!node.IsDeleted)
-            actions.Add("✏️ Изменить");
+            actions.Add("Изменить");
     
-        actions.Add(node.IsDeleted ? "♻️ Восстановить" : "🗑️ Удалить");
+        actions.Add(node.IsDeleted ? "Восстановить" : "Удалить");
     
         var result = await DisplayActionSheetAsync(
             $"Действия: {node.Name}",
@@ -84,7 +80,6 @@ public class MainPage : ContentPage
             actions.ToArray());
     
         await HandleActionAsync(result, node);
-    
         _collectionView.SelectedItem = null;
     }
     
@@ -92,16 +87,16 @@ public class MainPage : ContentPage
     {
         switch (action)
         {
-            case "➕ Добавить связь" when node.CanHaveChildren && !node.IsDeleted:
+            case "Добавить связь" when node.CanHaveChildren && !node.IsDeleted:
                 _viewModel.AddConnectionCommand.Execute(node);
                 break;
-            case "✏️ Изменить" when !node.IsDeleted:
+            case "Изменить" when !node.IsDeleted:
                 _viewModel.EditNodeCommand.Execute(node);
                 break;
-            case "🗑️ Удалить" when !node.IsDeleted:
+            case "Удалить" when !node.IsDeleted:
                 _viewModel.DeleteNodeCommand.Execute(node);
                 break;
-            case "♻️ Восстановить" when node.IsDeleted:
+            case "Восстановить" when node.IsDeleted:
                 _viewModel.RestoreNodeCommand.Execute(node);
                 break;
         }

@@ -8,64 +8,69 @@ public partial class InformSystem : Form
     public InformSystem(MenuLib.Menu menu)
     {
         InitializeComponent();
-        MenuStrip menuStrip = new MenuStrip();
-        foreach (MenuItem el in menu.Items)
+        var menuStrip = new MenuStrip();
+        foreach (var el in menu.Items)
         {
-            //ToolStripMenuItem MnuStripItem = new ToolStripMenuItem(el.Name, null, new EventHandler(Type.GetMethod(el.Method)));
-            if (el.Permission == "0")
+            switch (el.Permission)
             {
-                if (el.Kind == MenuItemKind.Action)
+                case "0":
                 {
-                    ToolStripMenuItem menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
-                    menuStrip.Items.Add(menuStripItem);
-                }
+                    if (el.Kind == MenuItemKind.Action)
+                    {
+                        var menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
+                        menuStrip.Items.Add(menuStripItem);
+                    }
 
-                if (el.Kind == MenuItemKind.Submenu)
-                {
-                    ToolStripMenuItem menuStripItem = new ToolStripMenuItem(el.Name, null);
-                    SubMenu(menuStripItem, el);
-                    menuStrip.Items.Add(menuStripItem);
+                    if (el.Kind == MenuItemKind.Submenu)
+                    {
+                        var menuStripItem = new ToolStripMenuItem(el.Name, null);
+                        SubMenu(menuStripItem, el);
+                        menuStrip.Items.Add(menuStripItem);
+                    }
+
+                    break;
                 }
-            }
-            else
-            {
-                if (el.Permission == "1")
+                case "1":
                 {
-                    ToolStripMenuItem menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
+                    var menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
                     menuStrip.Items.Add(menuStripItem);
+                    break;
                 }
             }
         }
+
         this.Controls.Add(menuStrip);
     }
 
     public void SubMenu(ToolStripMenuItem menuItem, MenuItem parentMenu)
     {
-        foreach (MenuItem el in parentMenu.SubItems)
+        foreach (var el in parentMenu.SubItems)
         {
-            //ToolStripMenuItem MnuStripItem = new ToolStripMenuItem(el.Name, null, new EventHandler(Type.GetMethod(el.Method)));
-            if (el.Permission == "0")
+            switch (el.Permission)
             {
-                if (el.Kind == MenuItemKind.Action)
+                case "0":
                 {
-                    ToolStripMenuItem menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
-                    menuItem.DropDownItems.Add(menuStripItem);
-                }
+                    if (el.Kind == MenuItemKind.Action)
+                    {
+                        var menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
+                        menuItem.DropDownItems.Add(menuStripItem);
+                    }
 
-                if (el.Kind == MenuItemKind.Submenu)
-                {
-                    ToolStripMenuItem menuStripItem = new ToolStripMenuItem(el.Name, null);
-                    SubMenu(menuStripItem, el);
-                    menuItem.DropDownItems.Add(menuStripItem);
+                    if (el.Kind == MenuItemKind.Submenu)
+                    {
+                        var menuStripItem = new ToolStripMenuItem(el.Name, null);
+                        SubMenu(menuStripItem, el);
+                        menuItem.DropDownItems.Add(menuStripItem);
+                    }
+
+                    break;
                 }
-            }
-            else
-            {
-                if (el.Permission == "1")
+                case "1":
                 {
-                    ToolStripMenuItem menuStripItem = new ToolStripMenuItem(el.Name, null);
+                    var menuStripItem = new ToolStripMenuItem(el.Name, null);
 
                     menuItem.DropDownItems.Add(menuStripItem);
+                    break;
                 }
             }
         }
@@ -74,21 +79,8 @@ public partial class InformSystem : Form
     public void ChildClick(object sender, EventArgs e)
     {
         MessageBox.Show(string.Concat("You have Clicked '", sender.ToString(), "' Menu"), "Menu Items Event",
-                                      MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    void FileMenuItemClick(object sender, EventArgs e)
-    {
-        MessageBox.Show("File menu item clicked");
-    }
-
-    private void InformSystem_Load(object sender, EventArgs e)
-    {
-
-    }
-
-    private void InformSystem_Load_1(object sender, EventArgs e)
-    {
-
-    }
+    private void InformSystem_Load_1(object sender, EventArgs e) {}
 }

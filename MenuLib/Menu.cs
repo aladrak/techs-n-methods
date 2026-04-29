@@ -3,7 +3,7 @@
     public class Menu
     {
         public List<MenuItem> Items { get; private set; } = new();
-        public List<MenuItem> PermitedItems { get; private set; } = new();
+        public List<MenuItem> PermittedItems { get; private set; } = new();
 
         public Menu(string permissionsPath, string filePath = "menu.txt")
         {
@@ -12,15 +12,12 @@
                 using var file = new StreamReader(permissionsPath);
                 while (!file.EndOfStream)
                 {
-                    string line = file.ReadLine()!;
-                    MenuItem curItem = MenuItem.Parse(line);
-                    PermitedItems.Add(curItem);
+                    var line = file.ReadLine()!;
+                    var curItem = MenuItem.Parse(line);
+                    PermittedItems.Add(curItem);
                 }
             }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"{ex.Message}:{ex.StackTrace}");
-            }
+            catch (Exception ex) { Console.Error.WriteLine($"{ex.Message}:{ex.StackTrace}"); }
             
             try
             {
@@ -29,7 +26,7 @@
                 {
                     string line = file.ReadLine()!;
                     MenuItem curItem = MenuItem.Parse(line);
-                    foreach (MenuItem permItem in PermitedItems)
+                    foreach (MenuItem permItem in PermittedItems)
                     {
                         if (permItem.Name == curItem.Name)
                         {
@@ -41,12 +38,12 @@
                         Items.Add(curItem);
                     else
                     {
-                        MenuItem parentItem = Items[Items.Count - 1];
+                        var parentItem = Items[Items.Count - 1];
                         while (parentItem.Level+1 != curItem.Level)
                         {
-                            parentItem = parentItem.SubItems[parentItem.SubItems.Count - 1];
+                            parentItem = parentItem.SubItems?[parentItem.SubItems.Count - 1];
                         }
-                        parentItem.SubItems.Add(curItem);
+                        parentItem.SubItems?.Add(curItem);
                     }
                 }
             }

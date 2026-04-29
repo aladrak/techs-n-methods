@@ -8,12 +8,11 @@
 
     public class MenuItem
     {
-        public int Level { get; init; }
-        public MenuItemKind Kind { get; init; }
-        public string Name { get; init; } = string.Empty;
+        public int Level { get; }
+        public MenuItemKind Kind { get; }
+        public string Name { get; }
         public string Permission { get; set; } = "0";
-        public object? Value { get; init; }
-        public string? Method => Value as string;
+        public object? Value { get; }
         public List<MenuItem>? SubItems => Value as List<MenuItem>;
 
         public MenuItem(int level, string name, string permission, string? method = null)
@@ -32,10 +31,10 @@
         public static MenuItem Parse(string value)
         {
             var data = value.Split(' ');
-            int level = int.Parse(data[0]);
-            string name = data[1];
-            string permission = data[2];
-            string? method = data.ElementAtOrDefault(3);
+            var level = int.Parse(data[0]);
+            var name = data[1];
+            var permission = data[2];
+            var method = data.ElementAtOrDefault(3);
 
             return new MenuItem(level, name, permission, method);
         }

@@ -167,7 +167,7 @@ partial class AuthForm
         this.capsLockStateInfo.Anchor = System.Windows.Forms.AnchorStyles.Right;
         this.capsLockStateInfo.AutoSize = true;
         this.capsLockStateInfo.BackColor = System.Drawing.SystemColors.GradientActiveCaption;
-        this.capsLockStateInfo.Location = new System.Drawing.Point(317, 7);
+        this.capsLockStateInfo.Location = new System.Drawing.Point(480, 7);
         this.capsLockStateInfo.Name = "capsLockStateInfo";
         this.capsLockStateInfo.Size = new System.Drawing.Size(187, 15);
         this.capsLockStateInfo.TabIndex = 8;

@@ -18,6 +18,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\AuthLib\AuthLib.csproj" />
       <ProjectReference Include="..\MenuLib\MenuLib.csproj" />
     </ItemGroup>
 

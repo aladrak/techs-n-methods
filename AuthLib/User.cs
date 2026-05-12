@@ -1,4 +1,4 @@
-﻿namespace MenuLib;
+﻿namespace AuthLib;
 
 public class User(string name, string password)
 {
@@ -13,5 +13,4 @@ public class User(string name, string password)
 
         return new User(name, password);
     }
-
 }

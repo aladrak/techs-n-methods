@@ -78,7 +78,7 @@ public partial class InformSystem : Form
 
     public void ChildClick(object sender, EventArgs e)
     {
-        MessageBox.Show(string.Concat("You have Clicked '", sender.ToString(), "' Menu"), "Menu Items Event",
+        MessageBox.Show(string.Concat("Вы кликнули на '", sender.ToString(), "'"), "Окно событий",
             MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 

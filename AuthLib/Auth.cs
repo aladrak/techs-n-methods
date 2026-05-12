@@ -1,4 +1,4 @@
-﻿namespace MenuLib;
+﻿namespace AuthLib;
 
 public class Auth
 {

@@ -4,11 +4,9 @@ namespace DynamicDataApp;
 
 public partial class InformSystem : Form
 {
-    private IMenu Menu;
     public InformSystem(IMenu menu)
     {
         InitializeComponent();
-        Menu = menu;
         var menuStrip = new MenuStrip();
         foreach (var el in menu.Items)
         {
@@ -45,9 +43,11 @@ public partial class InformSystem : Form
 
     private void SubMenu(ToolStripMenuItem menuItem, IMenuItem parentMenu)
     {
-        if (parentMenu.Value is List<IMenuItem> list)
+        if (parentMenu.Value is System.Collections.IEnumerable enumerable)
         {
-            foreach (var el in list)
+            List<IMenuItem> items = enumerable.Cast<IMenuItem>().ToList();
+
+            foreach (var el in items)
             {
                 switch (el.Permission)
                 {

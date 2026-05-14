@@ -1,12 +1,14 @@
-﻿namespace AuthLib;
+﻿using AppInterfaces;
 
-public class Auth
+namespace AuthLib;
+
+public class Auth : IAuth
 {
     public string UserPermissions { get; private set; }
 
-    public List<User> Users { get; } = [];
+    private List<User> _users = [];
 
-    public Auth(string enterName, string enterPassword)
+    public void TryAuth(string enterName, string enterPassword)
     {
         try
         {
@@ -16,7 +18,7 @@ public class Auth
             {
                 var line = file.ReadLine()!;
                 var curUser = User.Parse(line);
-                Users.Add(curUser);
+                _users.Add(curUser);
             }
         }
         catch (Exception ex)
@@ -24,7 +26,7 @@ public class Auth
             Console.Error.WriteLine($"{ex.Message}:{ex.StackTrace}");
         }
 
-        var matchFlag = Users.Any(el => el.Name == enterName && el.Password == enterPassword);
+        var matchFlag = _users.Any(el => el.Name == enterName && el.Password == enterPassword);
 
         if (matchFlag)
         {
@@ -40,7 +42,7 @@ public class Auth
         }
         else
         {
-            Console.Error.WriteLine($"No matching login and password");
+            Console.Error.WriteLine("No matching login and password");
         }
     }
 }

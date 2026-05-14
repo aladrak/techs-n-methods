@@ -1,16 +1,16 @@
 ﻿using AppInterfaces;
-using MenuLib;
-using MenuItem = MenuLib.MenuItem;
 
-namespace DataDrivenApp;
+namespace DynamicDataApp;
 
 public partial class InformSystem : Form
 {
-    public InformSystem(MenuLib.Menu menu)
+    private IMenu Menu;
+    public InformSystem(IMenu menu)
     {
         InitializeComponent();
+        Menu = menu;
         var menuStrip = new MenuStrip();
-        foreach (MenuItem el in menu.Items)
+        foreach (var el in menu.Items)
         {
             switch (el.Permission)
             {
@@ -40,38 +40,41 @@ public partial class InformSystem : Form
             }
         }
 
-        this.Controls.Add(menuStrip);
+        Controls.Add(menuStrip);
     }
 
-    public void SubMenu(ToolStripMenuItem menuItem, MenuItem parentMenu)
+    private void SubMenu(ToolStripMenuItem menuItem, IMenuItem parentMenu)
     {
-        foreach (var el in parentMenu.SubItems)
+        if (parentMenu.Value is List<IMenuItem> list)
         {
-            switch (el.Permission)
+            foreach (var el in list)
             {
-                case "0":
+                switch (el.Permission)
                 {
-                    if (el.Kind == MenuItemKind.Action)
+                    case "0":
                     {
-                        var menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
-                        menuItem.DropDownItems.Add(menuStripItem);
-                    }
+                        if (el.Kind == MenuItemKind.Action)
+                        {
+                            var menuStripItem = new ToolStripMenuItem(el.Name, null, ChildClick);
+                            menuItem.DropDownItems.Add(menuStripItem);
+                        }
 
-                    if (el.Kind == MenuItemKind.Submenu)
+                        if (el.Kind == MenuItemKind.Submenu)
+                        {
+                            var menuStripItem = new ToolStripMenuItem(el.Name, null);
+                            SubMenu(menuStripItem, el);
+                            menuItem.DropDownItems.Add(menuStripItem);
+                        }
+
+                        break;
+                    }
+                    case "1":
                     {
                         var menuStripItem = new ToolStripMenuItem(el.Name, null);
-                        SubMenu(menuStripItem, el);
+
                         menuItem.DropDownItems.Add(menuStripItem);
+                        break;
                     }
-
-                    break;
-                }
-                case "1":
-                {
-                    var menuStripItem = new ToolStripMenuItem(el.Name, null);
-
-                    menuItem.DropDownItems.Add(menuStripItem);
-                    break;
                 }
             }
         }

@@ -1,15 +1,15 @@
-﻿using MenuLib;
-using AuthLib;
-using Menu = MenuLib.Menu;
+﻿using System.Reflection;
+using AppInterfaces;
 
-namespace DataDrivenApp;
+namespace DynamicDataApp;
 
 public partial class AuthForm : Form
 {
-    public AuthForm()
+    private IAuth Perm { get; set; }
+    public AuthForm(IAuth perm)
     {
         InitializeComponent();
-
+        Perm = perm;
         InputLanguageChanged += (s, e) => currentLanguageInfo.Text =
             "Язык ввода " + e.Culture.DisplayName;
         
@@ -31,34 +31,33 @@ public partial class AuthForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        
-        var perm = new Auth();
-        perm.TryAuth(userNameInput.Text, passwordInput.Text);
-        if (string.IsNullOrEmpty(perm.UserPermissions))
+        Perm.TryAuth(userNameInput.Text, passwordInput.Text);
+        if (string.IsNullOrEmpty(Perm.UserPermissions))
         {
             MessageBox.Show(string.Concat("Юзер не существует"), "Такого юзера нет!",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+        IMenu? plugin = null;
+        try
+        {
+            Assembly asm = Assembly.LoadFrom("./menulib.dll");
+            Type? pluginType = asm.GetExportedTypes()
+                .FirstOrDefault(t => t.Name == "Menu");
+            if (pluginType == null)
+            {
+                throw new Exception("Подобный тип не найден.");
+            }
 
-        var menu = new Menu();
-        menu.SetMenu(perm.UserPermissions);
-        new InformSystem(menu).ShowDialog();
-    }
-
-    private void userNameInput_TextChanged(object sender, EventArgs e)
-    {
-
-    }
-
-    private void passwordInput_TextChanged(object sender, EventArgs e)
-    {
-
-    }
-
-    private void AuthForm_Load(object sender, EventArgs e)
-    {
-
+            plugin = (IMenu)Activator.CreateInstance(pluginType);
+        }
+        catch (Exception _)
+        {
+            Console.Error.WriteLine(e);
+            return;
+        }
+        plugin.SetMenu(Perm.UserPermissions);
+        new InformSystem(plugin).ShowDialog();
     }
 
     private void AuthForm_Load_1(object sender, EventArgs e)

@@ -41,7 +41,7 @@ public class Menu : IMenu
                 else
                 {
                     var parentItem = (MenuItem)Items[Items.Count - 1];
-                    while (parentItem.Level+1 != curItem.Level)
+                    while (parentItem.Level + 1 != curItem.Level)
                     {
                         parentItem = parentItem.SubItems?[^1];
                     }

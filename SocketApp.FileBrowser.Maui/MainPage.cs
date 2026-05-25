@@ -182,6 +182,7 @@ public sealed class MainPage : ContentPage
         {
             Text = _socketOptions.Host,
             FontSize = 14,
+            MinimumWidthRequest = 40,
             HeightRequest = 32,
             Keyboard = Keyboard.Numeric,
             BackgroundColor = Colors.White,
@@ -196,6 +197,7 @@ public sealed class MainPage : ContentPage
         {
             Text = _socketOptions.Port.ToString(),
             FontSize = 14,
+            WidthRequest = 20,
             HeightRequest = 32,
             Keyboard = Keyboard.Numeric,
             BackgroundColor = Colors.White,
@@ -209,6 +211,7 @@ public sealed class MainPage : ContentPage
         Picker picker = new()
         {
             Title = "Диски",
+            TitleColor = Colors.Black,
             FontSize = 14,
             HeightRequest = 32,
             BackgroundColor = Colors.White,
@@ -241,6 +244,7 @@ public sealed class MainPage : ContentPage
             ItemTemplate = new DataTemplate(() =>
             {
                 TextCell textCell = new();
+                textCell.TextColor = Colors.Black;
                 textCell.SetBinding(TextCell.TextProperty, nameof(FileBrowserItemViewModel.DisplayName));
                 return textCell;
             })
@@ -308,11 +312,7 @@ public sealed class MainPage : ContentPage
             await DisconnectClientAsync();
             StopServer();
 
-#if WINDOWS
             Application.Current?.Quit();
-#else
-            await DisplayAlert("Выход", "На этой платформе закрытие приложения выполняется системной кнопкой.", "OK");
-#endif
         };
 
         return button;
@@ -332,16 +332,13 @@ public sealed class MainPage : ContentPage
 
     private async void OnServerButtonClicked(object? sender, EventArgs eventArgs)
     {
-        if (_serverService is null)
-            await StartServerAsync();
-        else
-            StopServer();
+        if (_serverService is null) await StartServerAsync();
+        else StopServer();
     }
 
     private async Task StartServerAsync()
     {
-        if (!TryApplySocketOptions())
-            return;
+        if (!TryApplySocketOptions()) return;
 
         _serverService = new FileExplorerServerService();
         _serverCancellation = new CancellationTokenSource();
@@ -373,8 +370,7 @@ public sealed class MainPage : ContentPage
 
     private void StopServer()
     {
-        if (_serverService is null)
-            return;
+        if (_serverService is null) return;
 
         _serverCancellation?.Cancel();
         _serverService.Stop();
@@ -407,15 +403,12 @@ public sealed class MainPage : ContentPage
         }
     }
 
-    private async void OnDisconnectClicked(object? sender, EventArgs eventArgs)
-    {
-        await DisconnectClientAsync();
-    }
+    private async void OnDisconnectClicked(object? sender, EventArgs eventArgs) 
+        => await DisconnectClientAsync();
 
     private async Task DisconnectClientAsync()
     {
-        if (_clientService is null)
-            return;
+        if (_clientService is null) return;
 
         try
         {
@@ -423,7 +416,7 @@ public sealed class MainPage : ContentPage
         }
         catch
         {
-            // Отключение не должно мешать закрытию приложения.
+            //
         }
 
         await _clientService.DisposeAsync();
@@ -621,15 +614,10 @@ public sealed class MainPage : ContentPage
         _sendToClientButton.IsEnabled = isConnected;
     }
 
-    private void AppendClientLog(string text)
-    {
-        AppendLog(_clientLogEditor, text);
-    }
+    private void AppendClientLog(string text) => AppendLog(_clientLogEditor, text);
 
-    private void AppendServerLog(string text)
-    {
-        AppendLog(_serverLogEditor, text);
-    }
+    private void AppendServerLog(string text) => AppendLog(_serverLogEditor, text);
+    
 
     private static void AppendLog(Editor editor, string text)
     {
@@ -652,18 +640,11 @@ public sealed class MainPage : ContentPage
     }
 }
 
-public sealed class FileBrowserItemViewModel
+public sealed class FileBrowserItemViewModel(string displayName, string fullPath, string itemType)
 {
-    public FileBrowserItemViewModel(string displayName, string fullPath, string itemType)
-    {
-        DisplayName = displayName;
-        FullPath = fullPath;
-        ItemType = itemType;
-    }
+    public string DisplayName { get; } = displayName;
 
-    public string DisplayName { get; }
+    public string FullPath { get; } = fullPath;
 
-    public string FullPath { get; }
-
-    public string ItemType { get; }
+    public string ItemType { get; } = itemType;
 }

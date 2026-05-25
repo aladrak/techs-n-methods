@@ -85,7 +85,7 @@ public sealed partial class MainPage : ContentPage
 
         Label titleLabel = new()
         {
-            Text = "Задание 3. Пульт состояния технологических установок",
+            Text = "Пульт состояния технологических установок",
             FontSize = 22,
             FontAttributes = FontAttributes.Bold
         };
